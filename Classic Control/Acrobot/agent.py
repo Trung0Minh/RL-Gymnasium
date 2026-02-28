@@ -10,7 +10,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Sử dụng thiết bị: {device}")
 
 class DQNAgent:
-    def __init__(self, state_size, action_size, seed, buffer_size=int(1e5), batch_size=64, gamma=0.99, lr=5e-4, update_every=4):
+    def __init__(self, state_size, action_size, seed, buffer_size=int(1e5), batch_size=64, gamma=0.99, lr=5e-4, update_every=4, tau=1e-3):
         self.state_size = state_size
         self.action_size = action_size
         self.seed = random.seed(seed)
@@ -18,6 +18,7 @@ class DQNAgent:
         self.batch_size = batch_size
         self.lr = lr
         self.update_every = update_every
+        self.tau = tau
         self.t_step = 0
         
         self.qnetwork_local = QNetwork(state_size, action_size).to(device)
@@ -58,7 +59,7 @@ class DQNAgent:
         loss.backward()
         self.optimizer.step()
         
-        self.soft_update(self.qnetwork_local, self.qnetwork_target, tau=1e-3)
+        self.soft_update(self.qnetwork_local, self.qnetwork_target, tau=self.tau)
         
     def soft_update(self, local_model, target_model, tau):
         for target_param, local_param in zip(target_model.parameters(), local_model.parameters()):
