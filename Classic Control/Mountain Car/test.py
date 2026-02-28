@@ -5,8 +5,8 @@ import argparse
 from dqn_agent import DQNAgent
 import config
 
-def test(env, agent, checkpoint_path='best_checkpoint.pth'):
-    """Visualize the trained agent indefinitely."""
+def test(env, agent, n_episodes=5, checkpoint_path='best_checkpoint.pth'):
+    """Visualize the trained agent."""
     
     # Load the saved weights
     print(f"Loading weights from {checkpoint_path}...")
@@ -18,36 +18,37 @@ def test(env, agent, checkpoint_path='best_checkpoint.pth'):
         
     agent.qnetwork_local.eval()
 
-    state, _ = env.reset()
-    score = 0
-    
-    print("Starting test. Press Ctrl+C to stop.")
+    print(f"Starting test for {n_episodes} episodes. Press Ctrl+C to stop.")
     try:
-        while True:
-            # Scale velocity to be in a similar range to position for the NN
-            scaled_state = state.copy()
-            scaled_state[1] *= 15.0 # Scale ~0.07 to ~1.0
-            
-            # In testing, we use epsilon=0 to always take the best action
-            action = agent.act(scaled_state, eps=0.0)
-            next_state, reward, terminated, truncated, _ = env.step(action)
-            score += reward
-            state = next_state
-            
-            if terminated or truncated:
-                print(f"Final Score: {score}")
-                break
+        for i_episode in range(1, n_episodes + 1):
+            state, _ = env.reset()
+            score = 0
+            while True:
+                # Scale velocity to be in a similar range to position for the NN
+                scaled_state = state.copy()
+                scaled_state[1] *= 15.0 # Scale ~0.07 to ~1.0
                 
-            env.render()
+                # In testing, we use epsilon=0 to always take the best action
+                action = agent.act(scaled_state, eps=0.0)
+                next_state, reward, terminated, truncated, _ = env.step(action)
+                score += reward
+                state = next_state
+                
+                if terminated or truncated:
+                    print(f"Episode {i_episode}: Final Score: {score}")
+                    break
+                    
+                env.render()
             
     except KeyboardInterrupt:
-        print(f"\nStopped by user. Score reached: {score}")
+        print(f"\nStopped by user.")
     
     env.close()
 
 def main():
     parser = argparse.ArgumentParser(description='DQN Mountain Car Testing')
     parser.add_argument('--checkpoint', type=str, default='best_checkpoint.pth', help='Path to checkpoint')
+    parser.add_argument('--episodes', type=int, default=5, help='Number of episodes to test')
     parser.add_argument('--seed', type=int, default=config.SEED, help='Random seed')
     
     args = parser.parse_args()
@@ -60,7 +61,7 @@ def main():
     # Initialize the agent
     agent = DQNAgent(state_size=state_size, action_size=action_size, seed=args.seed)
     
-    test(env, agent, checkpoint_path=args.checkpoint)
+    test(env, agent, n_episodes=args.episodes, checkpoint_path=args.checkpoint)
 
 if __name__ == "__main__":
     main()

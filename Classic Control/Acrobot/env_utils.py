@@ -1,5 +1,4 @@
 import gymnasium as gym
-import numpy as np
 
 class BalancingAcrobotWrapper(gym.Wrapper):
     def __init__(self, env, mode='full'):

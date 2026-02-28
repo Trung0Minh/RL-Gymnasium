@@ -2,10 +2,11 @@ import gymnasium as gym
 import torch
 import numpy as np
 import argparse
+import os
 from ddpg_agent import Agent
 import config
 
-def test_ddpg(n_episodes=5, checkpoint_actor='checkpoint_actor.pth', seed=2):
+def test_ddpg(n_episodes=5, checkpoint_actor='model_weight/best_actor_checkpoint.pth', seed=2):
     """Evaluate the trained DDPG agent."""
     
     try:
@@ -50,7 +51,7 @@ def test_ddpg(n_episodes=5, checkpoint_actor='checkpoint_actor.pth', seed=2):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='DDPG Pendulum Testing')
     parser.add_argument('--episodes', type=int, default=5, help='Number of episodes to test')
-    parser.add_argument('--checkpoint', type=str, default='checkpoint_actor.pth', help='Path to actor checkpoint')
+    parser.add_argument('--checkpoint', type=str, default='model_weight/best_actor_checkpoint.pth', help='Path to actor checkpoint')
     parser.add_argument('--seed', type=int, default=config.SEED, help='Random seed')
     
     args = parser.parse_args()

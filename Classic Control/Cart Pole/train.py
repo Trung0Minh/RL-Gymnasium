@@ -3,12 +3,16 @@ import random
 import torch
 import numpy as np
 import argparse
+import os
 from collections import deque
 import matplotlib.pyplot as plt
 from dqn_agent import Agent
 import config
 
-def dqn(env, agent, n_episodes=2000, max_t=1000, eps_start=1.0, eps_end=0.01, eps_decay=0.995):
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+print(f"Using device: {device}")
+
+def dqn(env, agent, n_episodes=2000, max_t=1000, eps_start=1.0, eps_end=0.01, eps_decay=0.995, resume=False):
     """Deep Q-Learning.
     
     Params
@@ -18,12 +22,22 @@ def dqn(env, agent, n_episodes=2000, max_t=1000, eps_start=1.0, eps_end=0.01, ep
         eps_start (float): starting value of epsilon, for epsilon-greedy action selection
         eps_end (float): minimum value of epsilon
         eps_decay (float): multiplicative factor (per episode) for decreasing epsilon
+        resume (bool): whether to resume from checkpoint
     """
     scores = []                        # list containing scores from each episode
     scores_window = deque(maxlen=100)  # last 100 scores
     eps = eps_start                    # initialize epsilon
     best_score = -np.inf               # track best average score
-    
+    checkpoint_path = 'best_checkpoint.pth'
+
+    if resume and os.path.exists(checkpoint_path):
+        print(f"Resuming training from checkpoint: {checkpoint_path}")
+        agent.qnetwork_local.load_state_dict(torch.load(checkpoint_path))
+        agent.qnetwork_target.load_state_dict(torch.load(checkpoint_path))
+        eps = eps_end
+        best_score = 0.0
+
+    print(f"Starting DQN training for {n_episodes} episodes...")
     for i_episode in range(1, n_episodes+1):
         state, info = env.reset()
         score = 0
@@ -57,7 +71,7 @@ def dqn(env, agent, n_episodes=2000, max_t=1000, eps_start=1.0, eps_end=0.01, ep
         # Save best model
         if current_avg_score > best_score and i_episode >= 100:
             best_score = current_avg_score
-            torch.save(agent.qnetwork_local.state_dict(), 'best_checkpoint.pth')
+            torch.save(agent.qnetwork_local.state_dict(), checkpoint_path)
 
         if i_episode % 100 == 0:
             print('\rEpisode {}\tAverage Score: {:.2f}'.format(i_episode, current_avg_score))
@@ -66,6 +80,7 @@ def dqn(env, agent, n_episodes=2000, max_t=1000, eps_start=1.0, eps_end=0.01, ep
 
 def main():
     parser = argparse.ArgumentParser(description='DQN Cart Pole Training')
+    parser.add_argument('--resume', action='store_true', help='Resume from checkpoint')
     
     # Training parameters
     parser.add_argument('--n_episodes', type=int, default=config.N_EPISODES, help='Number of episodes')
@@ -94,14 +109,13 @@ def main():
                   gamma=args.gamma, tau=args.tau, lr=args.lr, update_every=args.update_every)
     
     scores = dqn(env, agent, n_episodes=args.n_episodes, max_t=args.max_t,
-                 eps_start=args.eps_start, eps_end=args.eps_end, eps_decay=args.eps_decay)
+                 eps_start=args.eps_start, eps_end=args.eps_end, eps_decay=args.eps_decay, resume=args.resume)
 
     # Plot the scores
-    fig = plt.figure()
-    ax = fig.add_subplot(111)
     plt.plot(np.arange(len(scores)), scores)
     plt.ylabel('Score')
     plt.xlabel('Episode #')
+    plt.title("DQN Training Scores for Cart Pole")
     plt.savefig('rewards.png')
     print("\nTraining plot saved as rewards.png")
     plt.show()

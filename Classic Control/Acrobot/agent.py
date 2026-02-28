@@ -7,7 +7,7 @@ from model import QNetwork
 from replay import ReplayBuffer
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print(f"Sử dụng thiết bị: {device}")
+print(f"Using device: {device}")
 
 class DQNAgent:
     def __init__(self, state_size, action_size, seed, buffer_size=int(1e5), batch_size=64, gamma=0.99, lr=5e-4, update_every=4, tau=1e-3):

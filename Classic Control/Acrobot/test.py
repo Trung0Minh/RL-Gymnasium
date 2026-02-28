@@ -4,20 +4,19 @@ from env_utils import BalancingAcrobotWrapper
 import argparse
 import os
 
-def test(mode='full'):
-    print(f"\nChạy thử agent đã huấn luyện cho mục tiêu: {mode}...")
+def test(mode='full', test_episodes=5):
+    print(f"\nTesting trained agent for objective: {mode} for {test_episodes} episodes...")
     env_test = gym.make("Acrobot-v1", render_mode="human")
     env_test = BalancingAcrobotWrapper(env_test, mode=mode)
     agent_test = DQNAgent(state_size=env_test.observation_space.shape[0], action_size=env_test.action_space.n, seed=0)
 
-    checkpoint_file = f'best_{mode}.pth'
+    checkpoint_file = f'model_weight/best_{mode}.pth'
     if not os.path.exists(checkpoint_file):
-        print(f"Lỗi: Không tìm thấy checkpoint {checkpoint_file}")
+        print(f"Error: Couldn't find checkpoint {checkpoint_file}")
         return
 
     agent_test.qnetwork_local.load_checkpoint(checkpoint_file)
 
-    test_episodes = 5
     for ep in range(test_episodes):
         state, info = env_test.reset()
         done = False
@@ -35,6 +34,7 @@ def test(mode='full'):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Test DQN Acrobot Balancing')
-    parser.add_argument('--mode', type=str, default='full', choices=['single', 'full'], help='Mục tiêu: single hoặc full')
+    parser.add_argument('--mode', type=str, default='full', choices=['single', 'full'], help='Objective: single or full')
+    parser.add_argument('--episodes', type=int, default=5, help='Number of episodes to test')
     args = parser.parse_args()
-    test(mode=args.mode)
+    test(mode=args.mode, test_episodes=args.episodes)

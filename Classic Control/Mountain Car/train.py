@@ -3,14 +3,18 @@ import random
 import torch
 import numpy as np
 import argparse
+import os
 from collections import deque
 import matplotlib.pyplot as plt
 from dqn_agent import DQNAgent
 import config
 
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+print(f"Using device: {device}")
+
 def train(n_episodes=4000, print_every=100, max_t=1000, eps_start=1.0, eps_end=0.01, eps_decay=0.999,
           buffer_size=int(1e5), batch_size=128, gamma=0.99, tau=1e-3, lr=5e-4, 
-          update_every=4, seed=0):
+          update_every=4, seed=0, resume=False):
     """Deep Q-Learning.
     
     Params
@@ -20,6 +24,7 @@ def train(n_episodes=4000, print_every=100, max_t=1000, eps_start=1.0, eps_end=0
         eps_start (float): starting value of epsilon, for epsilon-greedy action selection
         eps_end (float): minimum value of epsilon
         eps_decay (float): multiplicative factor (per episode) for decreasing epsilon
+        resume (bool): whether to resume from checkpoint
     """
     env = gym.make('MountainCar-v0')
     state_size = env.observation_space.shape[0]
@@ -32,7 +37,16 @@ def train(n_episodes=4000, print_every=100, max_t=1000, eps_start=1.0, eps_end=0
     scores_window = deque(maxlen=100)  # last 100 scores
     eps = eps_start                    # initialize epsilon
     best_score = -np.inf
+    checkpoint_path = 'best_checkpoint.pth'
 
+    if resume and os.path.exists(checkpoint_path):
+        print(f"Resuming training from checkpoint: {checkpoint_path}")
+        agent.qnetwork_local.load_state_dict(torch.load(checkpoint_path))
+        agent.qnetwork_target.load_state_dict(torch.load(checkpoint_path))
+        eps = eps_end
+        best_score = -110.0 # Approximate average score when nearly solved
+
+    print(f"Starting DQN training for {n_episodes} episodes...")
     for i_episode in range(1, n_episodes+1):
         state, _ = env.reset()
         score = 0
@@ -82,19 +96,20 @@ def train(n_episodes=4000, print_every=100, max_t=1000, eps_start=1.0, eps_end=0
         if i_episode % print_every == 0:
             print(f'\rEpisode {i_episode}\tAverage Score: {mean_score_100:.2f}')
         
-        if np.mean(scores_window) >= -95.0:
-            print('\nEnvironment solved in {:d} episodes!	Average Score: {:.2f}'.format(i_episode-100, np.mean(scores_window)))
-            agent.qnetwork_local.save_checkpoint('checkpoint.pth')
+        # Save only the best model based on 100-episode average
+        if mean_score_100 > best_score and i_episode >= 100:
+            best_score = mean_score_100
+            agent.qnetwork_local.save_checkpoint(checkpoint_path)
+
+        if mean_score_100 >= -110.0:
+            print(f'\nEnvironment solved in {i_episode} episodes!\tAverage Score: {mean_score_100:.2f}')
             break
-            
-        if score > best_score:
-            best_score = score
-            agent.qnetwork_local.save_checkpoint('best_checkpoint.pth')
 
     return scores
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='DQN Mountain Car Training')
+    parser.add_argument('--resume', action='store_true', help='Resume from checkpoint')
     
     # Training parameters
     parser.add_argument('--n_episodes', type=int, default=config.N_EPISODES, help='Number of episodes')
@@ -118,14 +133,14 @@ if __name__ == "__main__":
     scores = train(n_episodes=args.n_episodes, print_every=args.print_every, max_t=args.max_t,
                    eps_start=args.eps_start, eps_end=args.eps_end, eps_decay=args.eps_decay,
                    buffer_size=args.buffer_size, batch_size=args.batch_size, gamma=args.gamma,
-                   tau=args.tau, lr=args.lr, update_every=args.update_every, seed=args.seed)
+                   tau=args.tau, lr=args.lr, update_every=args.update_every, seed=args.seed,
+                   resume=args.resume)
 
     # plot the scores
-    fig = plt.figure()
-    ax = fig.add_subplot(111)
     plt.plot(np.arange(len(scores)), scores)
     plt.ylabel('Score')
     plt.xlabel('Episode #')
+    plt.title("DQN Training Scores for Mountain Car")
     plt.savefig('rewards.png')
     print("\nTraining plot saved as rewards.png")
     plt.show()

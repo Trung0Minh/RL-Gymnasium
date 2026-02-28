@@ -4,9 +4,13 @@ import gymnasium as gym
 import numpy as np
 import matplotlib.pyplot as plt
 import argparse
+import os
 from collections import deque
 from agent import DPGAgent
 import config
+
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+print(f"Using device: {device}")
 
 def set_seeds(seed):
     torch.manual_seed(seed)
@@ -18,7 +22,7 @@ def set_seeds(seed):
 def dpg_train(n_episodes=2000, max_t=500, print_every=100, train_seed=1,
               buffer_size=int(1e6), batch_size=64, gamma=0.99, 
               lr_actor=1e-4, lr_critic=1e-3, tau=1e-3, update_every=4,
-              noise_sigma=0.5, noise_decay=0.999):
+              noise_sigma=0.5, noise_decay=0.999, resume=False):
     set_seeds(train_seed)
     scores = []
     scores_window = deque(maxlen=100)
@@ -34,7 +38,21 @@ def dpg_train(n_episodes=2000, max_t=500, print_every=100, train_seed=1,
                      update_every=update_every, noise_sigma=noise_sigma, 
                      noise_decay=noise_decay)
     
-    print("Start training...")
+    actor_ckpt = 'best_actor_checkpoint.pth'
+    critic_ckpt = 'best_critic_checkpoint.pth'
+    ckpt_dir = 'model_weight/'
+    
+    best_mean_score = -np.inf
+
+    if resume and os.path.exists(ckpt_dir + actor_ckpt):
+        print(f"Resuming training from checkpoint: {actor_ckpt}")
+        agent.actor_local.load_checkpoint(actor_ckpt)
+        agent.actor_target.load_checkpoint(actor_ckpt)
+        agent.critic_local.load_checkpoint(critic_ckpt)
+        agent.critic_target.load_checkpoint(critic_ckpt)
+        best_mean_score = 90.0
+
+    print(f"Starting DPG training for {n_episodes} episodes...")
     for i_episode in range(1, n_episodes + 1):
         state, _ = env.reset()
         agent.reset_noise()
@@ -62,10 +80,14 @@ def dpg_train(n_episodes=2000, max_t=500, print_every=100, train_seed=1,
         if i_episode % print_every == 0:
             print(f'\rEpisode {i_episode}\tAverage Score: {mean_score_100:.2f}')
             
+        # Save only the best model
+        if mean_score_100 > best_mean_score and i_episode >= 100:
+            best_mean_score = mean_score_100
+            agent.actor_local.save_checkpoint(actor_ckpt)
+            agent.critic_local.save_checkpoint(critic_ckpt)
+
         if mean_score_100 >= 90.0:
-            print(f'\nEnvironment solved in {i_episode-100} episodes!\tAverage Score: {mean_score_100:.2f}')
-            agent.actor_local.save_checkpoint('dpg_actor_checkpoint.pth')
-            agent.critic_local.save_checkpoint('dpg_critic_checkpoint.pth')
+            print(f'\nEnvironment solved in {i_episode} episodes!\tAverage Score: {mean_score_100:.2f}')
             break
     
     env.close()
@@ -73,6 +95,7 @@ def dpg_train(n_episodes=2000, max_t=500, print_every=100, train_seed=1,
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='DPG Mountain Car Continuous Training')
+    parser.add_argument('--resume', action='store_true', help='Resume from checkpoint')
     
     # Training parameters
     parser.add_argument('--n_episodes', type=int, default=config.N_EPISODES, help='Number of episodes')
@@ -97,7 +120,7 @@ if __name__ == '__main__':
                        train_seed=args.seed, buffer_size=args.buffer_size, batch_size=args.batch_size,
                        gamma=args.gamma, lr_actor=args.lr_actor, lr_critic=args.lr_critic,
                        tau=args.tau, update_every=args.update_every, noise_sigma=args.noise_sigma,
-                       noise_decay=args.noise_decay)
+                       noise_decay=args.noise_decay, resume=args.resume)
 
     plt.plot(np.arange(len(scores)), scores)
     plt.ylabel('Score')

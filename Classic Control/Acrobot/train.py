@@ -1,12 +1,16 @@
 import gymnasium as gym
 import numpy as np
 import matplotlib.pyplot as plt
+import torch
 from collections import deque
 from agent import DQNAgent
 from env_utils import BalancingAcrobotWrapper
 import argparse
 import os
 import config
+
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+print(f"Using device: {device}")
 
 def dqn(mode='full', n_episodes=2000, max_t=500, eps_start=1.0, eps_end=0.01, eps_decay=0.998, 
         resume=False, buffer_size=int(1e5), batch_size=64, gamma=0.99, lr=5e-4, 
@@ -15,7 +19,8 @@ def dqn(mode='full', n_episodes=2000, max_t=500, eps_start=1.0, eps_end=0.01, ep
     scores_window = deque(maxlen=100)
     epsilon = eps_start
     best_mean_score = -np.inf
-    checkpoint_path = f'best_{mode}.pth'
+    checkpoint_path = f'model_weight/best_{mode}.pth'
+    os.makedirs('model_weight', exist_ok=True)
     
     env = gym.make('Acrobot-v1', render_mode=None)
     env = BalancingAcrobotWrapper(env, mode=mode)
@@ -26,13 +31,13 @@ def dqn(mode='full', n_episodes=2000, max_t=500, eps_start=1.0, eps_end=0.01, ep
                      lr=lr, update_every=update_every, tau=tau)
     
     if resume and os.path.exists(checkpoint_path):
-        print(f"Tiếp tục huấn luyện từ checkpoint: {checkpoint_path}")
+        print(f"Resuming training from checkpoint: {checkpoint_path}")
         agent.qnetwork_local.load_checkpoint(checkpoint_path)
         agent.qnetwork_target.load_checkpoint(checkpoint_path)
-        epsilon = eps_end # Bắt đầu với epsilon thấp khi resume
+        epsilon = eps_end # Start with low epsilon when resuming
         best_mean_score = 0.0 
     
-    print(f"Bắt đầu huấn luyện DQN cho mục tiêu: {mode} trong {n_episodes} episodes...")
+    print(f"Starting DQN training for objective: {mode} for {n_episodes} episodes...")
     for i_episode in range(1, n_episodes + 1):
         state, info = env.reset()
         score = 0
@@ -54,7 +59,7 @@ def dqn(mode='full', n_episodes=2000, max_t=500, eps_start=1.0, eps_end=0.01, ep
         mean_score_100 = np.mean(scores_window)
         print(f'\rEpisode {i_episode}\tAverage Score: {mean_score_100:.2f}', end="")
         
-        # Chỉ lưu khi đạt kết quả tốt nhất mới
+        # Save only when a new best result is achieved
         if i_episode >= 100 and mean_score_100 > best_mean_score:
             best_mean_score = mean_score_100
             agent.qnetwork_local.save_checkpoint(checkpoint_path)
@@ -71,11 +76,11 @@ def dqn(mode='full', n_episodes=2000, max_t=500, eps_start=1.0, eps_end=0.01, ep
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='DQN Acrobot Balancing')
-    parser.add_argument('--mode', type=str, default='full', choices=['single', 'full'], help='Mục tiêu: single (link 2 up) hoặc full (cả 2 up)')
-    parser.add_argument('--resume', action='store_true', help='Tiếp tục từ checkpoint tương ứng')
+    parser.add_argument('--mode', type=str, default='full', choices=['single', 'full'], help='Objective: single (link 2 up) or full (both links up)')
+    parser.add_argument('--resume', action='store_true', help='Resume from checkpoint')
     
     # Training parameters
-    parser.add_argument('--n_episodes', type=int, default=config.N_EPISODES, help='Số lượng episode')
+    parser.add_argument('--n_episodes', type=int, default=config.N_EPISODES, help='Number of episodes')
     parser.add_argument('--max_t', type=int, default=config.MAX_T, help='Max timesteps per episode')
     parser.add_argument('--eps_start', type=float, default=config.EPS_START, help='Starting epsilon')
     parser.add_argument('--eps_end', type=float, default=config.EPS_END, help='Minimum epsilon')
