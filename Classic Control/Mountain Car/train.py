@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 from dqn_agent import DQNAgent
 import config
 
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 
 def train(n_episodes=4000, print_every=100, max_t=1000, eps_start=1.0, eps_end=0.01, eps_decay=0.999,

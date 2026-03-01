@@ -34,7 +34,7 @@ def test(mode='full', test_episodes=5):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Test DQN Acrobot Balancing')
-    parser.add_argument('--mode', type=str, default='full', choices=['single', 'full'], help='Objective: single or full')
+    parser.add_argument('--mode', type=str, default='single', choices=['single', 'full'], help='Objective: single or full')
     parser.add_argument('--episodes', type=int, default=5, help='Number of episodes to test')
     args = parser.parse_args()
     test(mode=args.mode, test_episodes=args.episodes)

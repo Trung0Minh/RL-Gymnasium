@@ -4,7 +4,7 @@ import numpy as np
 from agent import Agent
 import argparse
 
-def test(n_episodes=5, checkpoint_path='checkpoint.pth'):
+def test(n_episodes=5, checkpoint_path='weights/checkpoint.pth'):
     """Test the trained DQN agent."""
     # Create environment with human rendering
     env = gym.make('LunarLander-v3', render_mode='human')
@@ -13,7 +13,18 @@ def test(n_episodes=5, checkpoint_path='checkpoint.pth'):
     
     # Initialize agent and load saved weights
     agent = Agent(state_size=state_size, action_size=action_size, seed=0)
-    agent.qnetwork_local.load_state_dict(torch.load(checkpoint_path, map_location=agent.device))
+    
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"Using device: {device}")
+
+    try:
+        agent.qnetwork_local.load_state_dict(torch.load(checkpoint_path, map_location=device))
+        print(f"Successfully loaded model from {checkpoint_path}")
+    except FileNotFoundError:
+        print(f"Checkpoint {checkpoint_path} not found.")
+        return
+
+    agent.qnetwork_local.eval()
     
     for i in range(1, n_episodes + 1):
         state, _ = env.reset()
@@ -26,16 +37,14 @@ def test(n_episodes=5, checkpoint_path='checkpoint.pth'):
             score += reward
             done = terminated or truncated
             
-        print(f"Episode {i}: Score = {score:.2f}")
+        print(f"Test Episode {i} | Reward: {score:.2f}")
         
     env.close()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--episodes", type=int, default=5)
+    parser.add_argument("--checkpoint", type=str, default="weights/checkpoint.pth")
     args = parser.parse_args()
     
-    try:
-        test(n_episodes=args.episodes)
-    except FileNotFoundError:
-        print("Error: 'checkpoint.pth' not found. Please train the agent first using 'python train.py'.")
+    test(n_episodes=args.episodes, checkpoint_path=args.checkpoint)

@@ -1,16 +1,14 @@
-# Hyperparameters for Taxi Q-learning
-import numpy as np
+# Environment Settings
+ENV_NAME = "Taxi-v3"
 
-# Q-learning parameters
+# Hyperparameters
 LEARNING_RATE = 0.1
 DISCOUNT_FACTOR = 0.99
-EPSILON = 1.0  # Initial exploration rate
+EPSILON = 1.0
 EPSILON_DECAY = 0.9995
 MIN_EPSILON = 0.01
 
 # Training parameters
-TOTAL_EPISODES = 15000
-MAX_STEPS_PER_EPISODE = 99
-
-# Environment settings
-ENV_NAME = "Taxi-v3"
+EPISODES = 15000
+MODELS_DIR = "models"
+PLOT_PATH = "training_rewards.png"

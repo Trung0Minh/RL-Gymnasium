@@ -1,9 +1,15 @@
-# Hyperparameters and Configuration
+# Environment Settings
+ENV_NAME = "Blackjack-v1"
+SAB = True  # Sutton & Barto rules
+
+# Hyperparameters
 LEARNING_RATE = 0.01
-EPISODES = 2000000
-DISCOUNT_FACTOR = 0.95
+DISCOUNT_FACTOR = 1
 EPSILON = 1.0
 EPSILON_DECAY = 0.999998
 MIN_EPSILON = 0.05
-SAB = True  # Sutton & Barto rules
-SAVE_PATH = "blackjack_q_table.pkl"
+
+# Training parameters
+EPISODES = 2000000
+MODELS_DIR = "models"
+PLOT_PATH = "training_rewards.png"

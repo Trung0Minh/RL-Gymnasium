@@ -7,6 +7,8 @@ HIDDEN_DIM = 256
 REPLAY_SIZE = 1000000
 START_STEPS = 10000
 UPDATE_AFTER = 1000
+EPISODES = 2000
+MAX_T = 2000
 
 # Speed Optimizations
 NUM_ENVS = 8          # Number of parallel environments

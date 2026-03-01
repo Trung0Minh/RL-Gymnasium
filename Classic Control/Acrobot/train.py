@@ -9,9 +9,6 @@ import argparse
 import os
 import config
 
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-print(f"Using device: {device}")
-
 def dqn(mode='full', n_episodes=2000, max_t=500, eps_start=1.0, eps_end=0.01, eps_decay=0.998, 
         resume=False, buffer_size=int(1e5), batch_size=64, gamma=0.99, lr=5e-4, 
         update_every=4, tau=1e-3, seed=0):
@@ -76,7 +73,7 @@ def dqn(mode='full', n_episodes=2000, max_t=500, eps_start=1.0, eps_end=0.01, ep
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='DQN Acrobot Balancing')
-    parser.add_argument('--mode', type=str, default='full', choices=['single', 'full'], help='Objective: single (link 2 up) or full (both links up)')
+    parser.add_argument('--mode', type=str, default='single', choices=['single', 'full'], help='Objective: single (link 2 up) or full (both links up)')
     parser.add_argument('--resume', action='store_true', help='Resume from checkpoint')
     
     # Training parameters

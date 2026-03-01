@@ -1,55 +1,58 @@
 import gymnasium as gym
 import numpy as np
-import pickle
+import argparse
+import os
+from agent import QLearningAgent
 import config
-import time
 
 def test():
-    # Create the environment with render_mode="human" to see the agent play
-    # Note: If running in a headless environment, use "ansi" or omit rendering
-    try:
-        env = gym.make(config.ENV_NAME, render_mode="human")
-    except Exception:
-        print("Human render mode failed, falling back to ansi")
-        env = gym.make(config.ENV_NAME, render_mode="ansi")
+    parser = argparse.ArgumentParser(description='Test trained Q-Learning agent on Taxi.')
+    parser.add_argument('--episodes', type=int, default=5, help='Number of episodes to test.')
+    parser.add_argument('--model', type=str, default=None, help='Path to the saved Q-table. If None, uses default best model.')
+    parser.add_argument('--render', type=str, default="human", choices=['human', 'ansi', 'rgb_array'], help='Render mode (e.g., human, ansi, rgb_array). Default: human.')
     
-    # Load the trained Q-table
-    try:
-        with open("q_table.pkl", "rb") as f:
-            q_table = pickle.load(f)
-    except FileNotFoundError:
-        print("Q-table not found! Please run train.py first.")
+    args = parser.parse_args()
+
+    # Initialize the environment
+    env = gym.make(config.ENV_NAME, render_mode=args.render)
+    n_states = env.observation_space.n
+    n_actions = env.action_space.n
+    
+    # Setup model path
+    if args.model is None:
+        model_path = os.path.join(config.MODELS_DIR, "best_q_table.pkl")
+    else:
+        model_path = args.model
+
+    # Initialize agent and load Q-table
+    agent = QLearningAgent(n_states, n_actions)
+    if os.path.exists(model_path):
+        agent.load(model_path)
+        print(f"Loaded model from {model_path}")
+    else:
+        print(f"Error: {model_path} not found. Please train the agent first.")
         return
 
-    print("Starting testing...")
-    
     total_rewards = []
-    num_test_episodes = 5
     
-    for episode in range(num_test_episodes):
-        state, info = env.reset()
+    print(f"Testing the agent for {args.episodes} episodes...")
+
+    for episode in range(args.episodes):
+        state, _ = env.reset()
         done = False
         episode_reward = 0
         
-        print(f"Episode {episode + 1}")
-        
         while not done:
-            # Always exploit the Q-table during testing
-            action = np.argmax(q_table[state, :])
-            
-            state, reward, terminated, truncated, info = env.step(action)
+            action = agent.get_action(state, is_training=False)
+            next_state, reward, terminated, truncated, _ = env.step(action)
             done = terminated or truncated
+            state = next_state
             episode_reward += reward
-            
-            # Print environment state if using ansi
-            if env.render_mode == "ansi":
-                print(env.render())
-                time.sleep(0.1)
         
         total_rewards.append(episode_reward)
-        print(f"Episode {episode + 1} finished with reward: {episode_reward}")
-    
-    print(f"Average Reward over {num_test_episodes} episodes: {np.mean(total_rewards)}")
+        print(f"Episode {episode + 1}: Reward = {episode_reward}")
+        
+    print(f"Average Reward over {args.episodes} episodes: {np.mean(total_rewards):.4f}")
     env.close()
 
 if __name__ == "__main__":

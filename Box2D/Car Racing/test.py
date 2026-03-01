@@ -12,9 +12,10 @@ def test():
     args = parser.parse_args()
 
     if args.checkpoint is None:
-        args.checkpoint = f"best_sac_{args.mode}.pth"
+        args.checkpoint = f"weights/best_sac_{args.mode}.pth"
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
     print(f"Testing SAC in {args.mode} mode using checkpoint {args.checkpoint}")
 
     is_continuous = (args.mode == "continuous")

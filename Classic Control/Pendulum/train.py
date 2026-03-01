@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 from ddpg_agent import Agent
 import config
 
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 
 def train_ddpg(n_episodes=500, max_t=200, print_every=100, seed=2,
@@ -82,7 +82,7 @@ def train_ddpg(n_episodes=500, max_t=200, print_every=100, seed=2,
             torch.save(agent.actor_local.state_dict(), actor_ckpt)
             torch.save(agent.critic_local.state_dict(), critic_ckpt)
             
-        if current_avg_score >= -200.0 and i_episode >= 100:
+        if current_avg_score >= -100.0 and i_episode >= 100:
             print(f'\nEnvironment solved in {i_episode} episodes!\tAverage Score: {current_avg_score:.2f}')
             break
             

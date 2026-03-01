@@ -1,6 +1,4 @@
-import gymnasium as gym
-
-# Environment configurations
+# Environment Settings
 ENV_NAME = "CliffWalking-v1"
 
 # Hyperparameters
@@ -11,8 +9,6 @@ EPSILON_DECAY = 0.995
 MIN_EPSILON = 0.01
 
 # Training parameters
-TOTAL_EPISODES = 500
-MAX_STEPS_PER_EPISODE = 100
-
-# Saving configurations
-MODEL_FILENAME = "q_table.npy"
+EPISODES = 500
+MODELS_DIR = "models"
+PLOT_PATH = "training_rewards.png"

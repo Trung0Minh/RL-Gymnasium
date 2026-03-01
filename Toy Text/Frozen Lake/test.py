@@ -1,56 +1,62 @@
 import gymnasium as gym
 import numpy as np
 import argparse
+import os
 from agent import QLearningAgent
 import config
 
-def test(args):
-    # Load the trained Q-table
-    try:
-        q_table = np.load(args.q_table)
-    except FileNotFoundError:
-        print(f"Error: {args.q_table} not found. Please train the agent first.")
-        return
+def test():
+    parser = argparse.ArgumentParser(description='Test trained Q-Learning agent on Frozen Lake.')
+    parser.add_argument('--episodes', type=int, default=10, help='Number of episodes to test.')
+    parser.add_argument('--slippery', type=str, default='false', choices=['true', 'false'], help='Slippery mode (true/false).')
+    parser.add_argument('--model', type=str, default=None, help='Path to the saved Q-table. If None, uses default path based on slippery mode.')
+    parser.add_argument('--render', type=str, default="human", choices=['human', 'ansi', 'rgb_array'], help='Render mode (e.g., human, ansi, rgb_array). Default: human.')
+    
+    args = parser.parse_args()
 
     # Initialize the environment
-    env = gym.make(config.ENV_NAME, is_slippery=args.slippery, map_name=args.map, render_mode=args.render)
+    is_slippery = args.slippery == 'true'
+    env = gym.make(config.ENV_NAME, is_slippery=is_slippery, map_name=config.MAP_NAME, render_mode=args.render)
     n_states = env.observation_space.n
     n_actions = env.action_space.n
     
-    # Initialize agent and set the loaded Q-table
+    # Setup model path
+    if args.model is None:
+        mode_str = "slippery" if is_slippery else "non_slippery"
+        model_path = os.path.join(config.MODELS_DIR, f"best_q_table_{mode_str}.pkl")
+    else:
+        model_path = args.model
+
+    # Initialize agent and load Q-table
     agent = QLearningAgent(n_states, n_actions)
-    agent.q_table = q_table
+    if os.path.exists(model_path):
+        agent.load(model_path)
+        print(f"Loaded model from {model_path}")
+    else:
+        print(f"Error: {model_path} not found. Please train the agent first.")
+        return
+
+    total_rewards = []
     
+    print(f"Testing the agent for {args.episodes} episodes (Slippery: {is_slippery})...")
+
     for episode in range(args.episodes):
         state, _ = env.reset()
         done = False
-        total_reward = 0
+        episode_reward = 0
         
-        print(f"Episode: {episode + 1}")
         while not done:
             action = agent.get_action(state, is_training=False)
             next_state, reward, terminated, truncated, _ = env.step(action)
             done = terminated or truncated
             state = next_state
-            total_reward += reward
-            
-            if args.render == "ansi":
-                print(env.render())
-            else:
-                env.render()
+            episode_reward += reward
         
-        print(f"Total Reward: {total_reward}")
+        total_rewards.append(episode_reward)
+        print(f"Episode {episode + 1}: Reward = {episode_reward}")
         
+    print(f"Average Reward over {args.episodes} episodes: {np.mean(total_rewards):.4f}")
     env.close()
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Test trained Q-Learning agent on Frozen Lake.')
-    parser.add_argument('--episodes', type=int, default=5, help='Number of episodes to test.')
-    parser.add_argument('--q_table', type=str, default="q_table.npy", help='Path to the saved Q-table.')
-    parser.add_argument('--render', type=str, default=config.RENDER_MODE_TEST, help='Render mode (human or ansi).')
-    parser.add_argument('--slippery', action='store_true', default=config.IS_SLIPPERY, help='Whether the environment is slippery.')
-    parser.add_argument('--no-slippery', action='store_false', dest='slippery', help='Make the environment non-slippery.')
-    parser.add_argument('--map', type=str, default=config.MAP_NAME, help='Map size (4x4 or 8x8).')
-
-    args = parser.parse_args()
-    test(args)
+    test()

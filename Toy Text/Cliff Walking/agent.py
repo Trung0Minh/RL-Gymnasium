@@ -2,7 +2,7 @@ import numpy as np
 import pickle
 
 class QLearningAgent:
-    def __init__(self, n_states, n_actions, learning_rate=0.1, discount_factor=0.99, epsilon=1.0, epsilon_decay=0.9995, min_epsilon=0.01):
+    def __init__(self, n_states, n_actions, learning_rate=0.1, discount_factor=0.99, epsilon=1.0, epsilon_decay=0.995, min_epsilon=0.01):
         self.n_states = n_states
         self.n_actions = n_actions
         self.lr = learning_rate

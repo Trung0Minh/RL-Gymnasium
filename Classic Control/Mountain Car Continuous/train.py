@@ -9,7 +9,7 @@ from collections import deque
 from agent import DPGAgent
 import config
 
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 
 def set_seeds(seed):

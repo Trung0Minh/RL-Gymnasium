@@ -33,7 +33,7 @@ class Agent():
         self.tau = tau
         self.update_every = update_every
 
-        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         # Q-Network
         self.qnetwork_local = QNetwork(state_size, action_size, seed).to(self.device)
