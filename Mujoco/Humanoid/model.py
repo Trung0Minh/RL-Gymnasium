@@ -1,53 +1,44 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
+from torch.distributions import Normal
 
-class Actor(nn.Module):
+class ActorCritic(nn.Module):
     def __init__(self, obs_dim, action_dim):
-        super().__init__()
-
-        self.net = nn.Sequential(
-            nn.Linear(obs_dim, 256),
+        super(ActorCritic, self).__init__()
+        
+        # Shared or separate backbones? For stability, often separate is better.
+        # Actor network
+        self.actor = nn.Sequential(
+            nn.Linear(obs_dim, 512),
             nn.Tanh(),
-            nn.Linear(256, 256),
+            nn.Linear(512, 512),
             nn.Tanh(),
+            nn.Linear(512, action_dim),
         )
-
-        self.mu = nn.Linear(256, action_dim)
-
-        # log_std là parameter tự do
-        self.log_std = nn.Parameter(torch.zeros(action_dim))
-
-    def forward(self, obs):
-        x = self.net(obs)
-        mu = self.mu(x)
-        # Clamp log_std to prevent it from exploding or collapsing
-        log_std = torch.clamp(self.log_std, -20, 2)
-        std = torch.exp(log_std)
-        return mu, std
-    
-    def get_dist(self, obs):
-        mu, std = self.forward(obs)
-        return torch.distributions.Normal(mu, std)
-    
-    def get_action(self, obs):
-        dist = self.get_dist(obs)
-        action = dist.sample()
-        log_prob = dist.log_prob(action).sum(dim=-1)
-
-        return action, log_prob
-    
-class Critic(nn.Module):
-    def __init__(self, obs_dim):
-        super().__init__()
-
-        self.net = nn.Sequential(
-            nn.Linear(obs_dim, 256),
+        
+        # Action standard deviation (learnable parameter)
+        # Initialize to -1.0 (std ~ 0.36) for better initial stability
+        self.log_std = nn.Parameter(torch.full((1, action_dim), -1.0))
+        
+        # Critic network
+        self.critic = nn.Sequential(
+            nn.Linear(obs_dim, 512),
             nn.Tanh(),
-            nn.Linear(256, 256),
+            nn.Linear(512, 512),
             nn.Tanh(),
-            nn.Linear(256, 1)
+            nn.Linear(512, 1)
         )
 
     def forward(self, obs):
-        return self.net(obs)
+        return self.actor(obs), self.critic(obs)
+
+    def get_action_and_value(self, obs, action=None):
+        mean = self.actor(obs)
+        std = self.log_std.exp().expand_as(mean)
+        probs = Normal(mean, std)
+        if action is None:
+            action = probs.sample()
+        return action, probs.log_prob(action).sum(1), probs.entropy().sum(1), self.critic(obs)
+
+    def get_value(self, obs):
+        return self.critic(obs)
