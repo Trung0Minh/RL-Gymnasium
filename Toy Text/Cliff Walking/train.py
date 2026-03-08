@@ -1,97 +1,77 @@
 import gymnasium as gym
 import numpy as np
-import matplotlib.pyplot as plt
 import argparse
 import os
+from collections import deque
+import matplotlib.pyplot as plt
 from agent import QLearningAgent
-import config
+from config import QConfig
 
-def train():
-    parser = argparse.ArgumentParser(description='Train Q-Learning agent on Cliff Walking.')
-    parser.add_argument('--episodes', type=int, default=config.EPISODES, help='Number of episodes to train.')
-    parser.add_argument('--lr', type=float, default=config.LEARNING_RATE, help='Learning rate.')
-    parser.add_argument('--gamma', type=float, default=config.DISCOUNT_FACTOR, help='Discount factor.')
-    parser.add_argument('--epsilon', type=float, default=config.EPSILON, help='Initial exploration rate.')
-    parser.add_argument('--epsilon_decay', type=float, default=config.EPSILON_DECAY, help='Exploration decay rate.')
-    parser.add_argument('--min_epsilon', type=float, default=config.MIN_EPSILON, help='Minimum exploration rate.')
-    parser.add_argument('--continue_train', action='store_true', help='Continue training from saved checkpoint.')
+def train(cfg: QConfig):
+    env = gym.make(cfg.env_id)
+    agent = QLearningAgent(n_states=env.observation_space.n, n_actions=env.action_space.n, config=cfg)
     
-    args = parser.parse_args()
+    checkpoint_path = f"{cfg.checkpoint_dir}/cliff_walking_q.pkl"
+    os.makedirs(cfg.checkpoint_dir, exist_ok=True)
 
-    env = gym.make(config.ENV_NAME)
-    n_states = env.observation_space.n
-    n_actions = env.action_space.n
-    
-    # Setup save paths
-    os.makedirs(config.MODELS_DIR, exist_ok=True)
-    save_path = os.path.join(config.MODELS_DIR, "q_table.pkl")
-    best_save_path = os.path.join(config.MODELS_DIR, "best_q_table.pkl")
-
-    agent = QLearningAgent(
-        n_states, 
-        n_actions, 
-        learning_rate=args.lr, 
-        discount_factor=args.gamma, 
-        epsilon=args.epsilon, 
-        epsilon_decay=args.epsilon_decay,
-        min_epsilon=args.min_epsilon
-    )
-    
-    if args.continue_train and os.path.exists(save_path):
-        print(f"Loading checkpoint from {save_path}...")
-        agent.load(save_path)
+    if cfg.resume and os.path.exists(checkpoint_path):
+        print(f"Resuming training from checkpoint: {checkpoint_path}")
+        agent.load(checkpoint_path)
 
     rewards = []
-    best_avg_reward = -float('inf')
+    rewards_window = deque(maxlen=100)
     
-    print(f"Starting training for {args.episodes} episodes...")
+    print(f"Starting training on CPU...")
     
-    for episode in range(args.episodes):
-        state, _ = env.reset()
+    for i_episode in range(1, cfg.num_episodes + 1):
+        state, info = env.reset()
+        score = 0
         done = False
-        total_reward = 0
         
         while not done:
-            action = agent.get_action(state)
-            next_state, reward, terminated, truncated, _ = env.step(action)
+            action = agent.act(state)
+            next_state, reward, terminated, truncated, info = env.step(action)
             done = terminated or truncated
             
-            agent.update(state, action, reward, next_state, done)
+            agent.update(state, action, reward, next_state, terminated)
             state = next_state
-            total_reward += reward
+            score += reward
         
-        agent.decay_epsilon()
-        rewards.append(total_reward)
+        agent.step() # epsilon decay
+        rewards.append(score)
+        rewards_window.append(score)
         
-        if (episode + 1) % 50 == 0:
-            avg_reward = np.mean(rewards[-50:])
-            print(f"Episode: {episode + 1}, Reward: {total_reward}, Avg Reward: {avg_reward:.4f}, Epsilon: {agent.epsilon:.4f}")
-            
-            if avg_reward > best_avg_reward:
-                best_avg_reward = avg_reward
-                agent.save(best_save_path)
+        avg_reward = np.mean(rewards_window)
+        log_str = f"Episode {i_episode}\tAverage Reward: {avg_reward:.2f}\tEpsilon: {agent.epsilon:.4f}"
+        
+        if i_episode % 100 == 0:
+            print(f"\r{log_str}")
+            agent.save(checkpoint_path)
+        else:
+            print(f"\r{log_str}", end="", flush=True)
 
-    # Final check for best model
-    if rewards:
-        avg_reward = np.mean(rewards[-min(50, len(rewards)):])
-        if avg_reward > best_avg_reward:
-            agent.save(best_save_path)
-            print(f"Final model saved as best with Avg Reward: {avg_reward:.4f}")
-
-    agent.save(save_path)
-    print(f"Final Q-table saved to {save_path}")
-    
+    print()
     env.close()
+    return rewards
 
-    # Plot and save rewards
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    for key, value in QConfig().__dict__.items():
+        if isinstance(value, bool):
+            parser.add_argument(f"--{key}", action="store_true", default=value)
+        else:
+            parser.add_argument(f"--{key}", type=type(value) if value is not None else str, default=value)
+    
+    args = parser.parse_args()
+    config = QConfig(**vars(args))
+    
+    rewards = train(config)
+
+    # Plotting
     plt.figure(figsize=(10, 5))
     plt.plot(rewards)
     plt.xlabel('Episodes')
     plt.ylabel('Rewards')
-    plt.title('Training Rewards over Episodes')
-    plt.savefig(config.PLOT_PATH)
-    print(f"Training rewards plot saved as {config.PLOT_PATH}")
-    plt.show()
-
-if __name__ == "__main__":
-    train()
+    plt.title('DQN Training Rewards for Cliff Walking')
+    plt.savefig('rewards.png')
+    print(f"\nTraining rewards plot saved as rewards.png")

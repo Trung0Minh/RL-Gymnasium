@@ -1,15 +1,15 @@
-# Environment Settings
-ENV_NAME = "Blackjack-v1"
-SAB = True  # Sutton & Barto rules
+from dataclasses import dataclass
 
-# Hyperparameters
-LEARNING_RATE = 0.01
-DISCOUNT_FACTOR = 1
-EPSILON = 1.0
-EPSILON_DECAY = 0.999998
-MIN_EPSILON = 0.05
-
-# Training parameters
-EPISODES = 2000000
-MODELS_DIR = "models"
-PLOT_PATH = "training_rewards.png"
+@dataclass
+class QConfig:
+    env_id: str = "Blackjack-v1"
+    num_episodes: int = 2000000
+    learning_rate: float = 0.01
+    discount_factor: float = 0.95
+    epsilon: float = 1.0
+    epsilon_decay: float = 0.999998
+    min_epsilon: float = 0.05
+    checkpoint_dir: str = "checkpoints"
+    resume: bool = False
+    seed: int = 1
+    sab: bool = True # Simple Agent Blackjack rules

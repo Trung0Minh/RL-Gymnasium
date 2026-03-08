@@ -1,14 +1,14 @@
-# Environment Settings
-ENV_NAME = "Taxi-v3"
+from dataclasses import dataclass
 
-# Hyperparameters
-LEARNING_RATE = 0.1
-DISCOUNT_FACTOR = 0.99
-EPSILON = 1.0
-EPSILON_DECAY = 0.9995
-MIN_EPSILON = 0.01
-
-# Training parameters
-EPISODES = 15000
-MODELS_DIR = "models"
-PLOT_PATH = "training_rewards.png"
+@dataclass
+class QConfig:
+    env_id: str = "Taxi-v3"
+    num_episodes: int = 15000
+    learning_rate: float = 0.1
+    discount_factor: float = 0.99
+    epsilon: float = 1.0
+    epsilon_decay: float = 0.9995
+    min_epsilon: float = 0.01
+    checkpoint_dir: str = "checkpoints"
+    resume: bool = False
+    seed: int = 1

@@ -1,66 +1,48 @@
 import gymnasium as gym
-import numpy as np
 import argparse
 import os
 from agent import BlackjackAgent
-import config
+from config import QConfig
 
-def test():
-    parser = argparse.ArgumentParser(description='Test trained Q-Learning agent on Blackjack.')
-    parser.add_argument('--episodes', type=int, default=10, help='Number of episodes to test.')
-    parser.add_argument('--model', type=str, default=None, help='Path to the saved Q-table. If None, uses default best model.')
-    parser.add_argument('--render', type=str, default="human", choices=['human', 'rgb_array'], help='Render mode (e.g., human, rgb_array). Default: human.')
+def test(cfg: QConfig, n_episodes=5):
+    """Test the trained Q-Learning agent."""
+    # Create environment with human rendering
+    env = gym.make(cfg.env_id, sab=cfg.sab, render_mode='human')
+    agent = BlackjackAgent(config=cfg)
     
-    args = parser.parse_args()
+    checkpoint_path = f"{cfg.checkpoint_dir}/blackjack_q.pkl"
+    try:
+        agent.load(checkpoint_path)
+        print(f"Successfully loaded model from {checkpoint_path}")
+    except FileNotFoundError:
+        print(f"Checkpoint {checkpoint_path} not found. Running with random weights.")
 
-    # Initialize the environment
-    render_mode = args.render
-    env = gym.make(config.ENV_NAME, sab=config.SAB, render_mode=render_mode)
-    
-    # Setup model path
-    if args.model is None:
-        model_path = os.path.join(config.MODELS_DIR, "best_q_table.pkl")
-    else:
-        model_path = args.model
-
-    # Initialize agent and load Q-table
-    agent = BlackjackAgent()
-    if os.path.exists(model_path):
-        agent.load(model_path)
-        print(f"Loaded model from {model_path}")
-    else:
-        print(f"Error: {model_path} not found. Please train the agent first.")
-        return
-
-    wins = 0
-    losses = 0
-    draws = 0
-    
-    print(f"Testing the agent for {args.episodes} episodes...")
-
-    for episode in range(args.episodes):
-        state, info = env.reset()
+    for i in range(1, n_episodes + 1):
+        state, _ = env.reset()
+        score = 0
         done = False
-        
         while not done:
-            action = agent.get_action(state, is_training=False)
-            next_state, reward, terminated, truncated, info = env.step(action)
+            # Select action greedily (no training/exploration)
+            action = agent.act(state, is_training=False)
+            state, reward, terminated, truncated, _ = env.step(action)
+            score += reward
             done = terminated or truncated
-            state = next_state
             
-        if reward > 0:
-            wins += 1
-        elif reward < 0:
-            losses += 1
-        else:
-            draws += 1
-            
-    print(f"Results over {args.episodes} episodes:")
-    print(f"Wins: {wins} ({(wins/args.episodes)*100:.2f}%)")
-    print(f"Losses: {losses} ({(losses/args.episodes)*100:.2f}%)")
-    print(f"Draws: {draws} ({(draws/args.episodes)*100:.2f}%)")
-    
+        print(f"Test Episode {i} | Reward: {score:.2f}")
+        
     env.close()
 
 if __name__ == "__main__":
-    test()
+    parser = argparse.ArgumentParser()
+    # Dynamically build parser from QConfig fields
+    for key, value in QConfig().__dict__.items():
+        if isinstance(value, bool):
+            parser.add_argument(f"--{key}", action="store_true", default=value)
+        else:
+            parser.add_argument(f"--{key}", type=type(value) if value is not None else str, default=value)
+    parser.add_argument("--test_episodes", type=int, default=5)
+    
+    args = parser.parse_args()
+    config = QConfig(**{k: v for k, v in vars(args).items() if k in QConfig().__dict__})
+    
+    test(config, n_episodes=args.test_episodes)

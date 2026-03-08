@@ -1,62 +1,48 @@
 import gymnasium as gym
-import numpy as np
 import argparse
 import os
 from agent import QLearningAgent
-import config
+from config import QConfig
 
-def test():
-    parser = argparse.ArgumentParser(description='Test trained Q-Learning agent on Frozen Lake.')
-    parser.add_argument('--episodes', type=int, default=10, help='Number of episodes to test.')
-    parser.add_argument('--slippery', type=str, default='false', choices=['true', 'false'], help='Slippery mode (true/false).')
-    parser.add_argument('--model', type=str, default=None, help='Path to the saved Q-table. If None, uses default path based on slippery mode.')
-    parser.add_argument('--render', type=str, default="human", choices=['human', 'ansi', 'rgb_array'], help='Render mode (e.g., human, ansi, rgb_array). Default: human.')
+def test(cfg: QConfig, n_episodes=5):
+    """Test the trained Q-Learning agent."""
+    # Create environment with human rendering
+    env = gym.make(cfg.env_id, is_slippery=cfg.is_slippery, map_name=cfg.map_name, render_mode='human')
+    agent = QLearningAgent(n_states=env.observation_space.n, n_actions=env.action_space.n, config=cfg)
     
-    args = parser.parse_args()
+    checkpoint_path = f"{cfg.checkpoint_dir}/frozen_lake_q.pkl"
+    try:
+        agent.load(checkpoint_path)
+        print(f"Successfully loaded model from {checkpoint_path}")
+    except FileNotFoundError:
+        print(f"Checkpoint {checkpoint_path} not found. Running with random weights.")
 
-    # Initialize the environment
-    is_slippery = args.slippery == 'true'
-    env = gym.make(config.ENV_NAME, is_slippery=is_slippery, map_name=config.MAP_NAME, render_mode=args.render)
-    n_states = env.observation_space.n
-    n_actions = env.action_space.n
-    
-    # Setup model path
-    if args.model is None:
-        mode_str = "slippery" if is_slippery else "non_slippery"
-        model_path = os.path.join(config.MODELS_DIR, f"best_q_table_{mode_str}.pkl")
-    else:
-        model_path = args.model
-
-    # Initialize agent and load Q-table
-    agent = QLearningAgent(n_states, n_actions)
-    if os.path.exists(model_path):
-        agent.load(model_path)
-        print(f"Loaded model from {model_path}")
-    else:
-        print(f"Error: {model_path} not found. Please train the agent first.")
-        return
-
-    total_rewards = []
-    
-    print(f"Testing the agent for {args.episodes} episodes (Slippery: {is_slippery})...")
-
-    for episode in range(args.episodes):
+    for i in range(1, n_episodes + 1):
         state, _ = env.reset()
+        score = 0
         done = False
-        episode_reward = 0
-        
         while not done:
-            action = agent.get_action(state, is_training=False)
-            next_state, reward, terminated, truncated, _ = env.step(action)
+            # Select action greedily (no training/exploration)
+            action = agent.act(state, is_training=False)
+            state, reward, terminated, truncated, _ = env.step(action)
+            score += reward
             done = terminated or truncated
-            state = next_state
-            episode_reward += reward
+            
+        print(f"Test Episode {i} | Reward: {score:.2f}")
         
-        total_rewards.append(episode_reward)
-        print(f"Episode {episode + 1}: Reward = {episode_reward}")
-        
-    print(f"Average Reward over {args.episodes} episodes: {np.mean(total_rewards):.4f}")
     env.close()
 
 if __name__ == "__main__":
-    test()
+    parser = argparse.ArgumentParser()
+    # Dynamically build parser from QConfig fields
+    for key, value in QConfig().__dict__.items():
+        if isinstance(value, bool):
+            parser.add_argument(f"--{key}", action="store_true", default=value)
+        else:
+            parser.add_argument(f"--{key}", type=type(value) if value is not None else str, default=value)
+    parser.add_argument("--test_episodes", type=int, default=5)
+    
+    args = parser.parse_args()
+    config = QConfig(**{k: v for k, v in vars(args).items() if k in QConfig().__dict__})
+    
+    test(config, n_episodes=args.test_episodes)

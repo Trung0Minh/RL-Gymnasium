@@ -2,17 +2,18 @@ import numpy as np
 import pickle
 
 class QLearningAgent:
-    def __init__(self, n_states, n_actions, learning_rate=0.1, discount_factor=0.99, epsilon=1.0, epsilon_decay=0.995, min_epsilon=0.01):
+    def __init__(self, n_states, n_actions, config, device=None):
         self.n_states = n_states
         self.n_actions = n_actions
-        self.lr = learning_rate
-        self.gamma = discount_factor
-        self.epsilon = epsilon
-        self.epsilon_decay = epsilon_decay
-        self.min_epsilon = min_epsilon
+        self.config = config
+        self.lr = config.learning_rate
+        self.gamma = config.discount_factor
+        self.epsilon = config.epsilon
+        self.epsilon_decay = config.epsilon_decay
+        self.min_epsilon = config.min_epsilon
         self.q_table = np.zeros((n_states, n_actions))
 
-    def get_action(self, state, is_training=True):
+    def act(self, state, is_training=True):
         """Epsilon-greedy action selection."""
         if is_training and np.random.uniform(0, 1) < self.epsilon:
             return np.random.randint(self.n_actions)
@@ -25,7 +26,7 @@ class QLearningAgent:
         td_error = td_target - self.q_table[state][action]
         self.q_table[state][action] += self.lr * td_error
 
-    def decay_epsilon(self):
+    def step(self):
         """Decay the exploration rate."""
         self.epsilon = max(self.min_epsilon, self.epsilon * self.epsilon_decay)
 
