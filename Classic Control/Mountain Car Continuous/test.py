@@ -2,58 +2,55 @@ import gymnasium as gym
 import torch
 import numpy as np
 import argparse
-from agent import Agent
-import config
+import os
+from agent import TD3Agent
+from config import TD3Config
 
-def test(env, agent, n_episodes=5):
-    """
-    Standardized Test Loop.
-    """
-    print(f"Starting test for {n_episodes} episodes. Press Ctrl+C to stop.")
+def test(cfg: TD3Config, n_episodes=5):
+    """Test the trained TD3 agent."""
+    # Create environment with human rendering
+    env = gym.make(cfg.env_id, render_mode='human')
+    state_dim = env.observation_space.shape[0]
+    action_dim = env.action_space.shape[0]
     
+    device = torch.device('cuda' if torch.device('available') else 'cpu')
+    print(f"Using device: {device}")
+
+    # Initialize agent
+    agent = TD3Agent(state_dim=state_dim, action_dim=action_dim, config=cfg, device=device)
+    
+    checkpoint_path = f"{cfg.checkpoint_dir}/mountain_car_continuous_td3.pt"
     try:
-        for i_episode in range(1, n_episodes + 1):
-            state, info = env.reset()
-            score = 0
-            while True:
-                # In testing, we don't add noise
-                action = agent.act(state, add_noise=False)
-                state, reward, terminated, truncated, info = env.step(action)
-                score += reward
-                
-                if terminated or truncated:
-                    print(f"Episode {i_episode}: Final Score: {score:.2f}")
-                    break
-                    
-                env.render()
+        agent.load(checkpoint_path)
+        print(f"Successfully loaded model from {checkpoint_path}")
+    except FileNotFoundError:
+        print(f"Checkpoint {checkpoint_path} not found. Running with random weights.")
+
+    for i in range(1, n_episodes + 1):
+        state, _ = env.reset()
+        score = 0
+        done = False
+        while not done:
+            action = agent.act(state)
+            state, reward, terminated, truncated, _ = env.step(action[0])
+            score += reward
+            done = terminated or truncated
             
-    except KeyboardInterrupt:
-        print(f"\nStopped by user.")
-    
+        print(f"Test Episode {i} | Reward: {score:.2f}")
+        
     env.close()
 
-def main():
-    parser = argparse.ArgumentParser(description='DPG Mountain Car Continuous Testing')
-    parser.add_argument('--checkpoint', type=str, default='model_weight/checkpoint.pth', help='Path to checkpoint')
-    parser.add_argument('--episodes', type=int, default=5, help='Number of episodes to test')
-    parser.add_argument('--seed', type=int, default=config.SEED, help='Random seed')
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    # Dynamically build parser from TD3Config fields
+    for key, value in TD3Config().__dict__.items():
+        if isinstance(value, bool):
+            parser.add_argument(f"--{key}", action="store_true", default=value)
+        else:
+            parser.add_argument(f"--{key}", type=type(value) if value is not None else str, default=value)
+    parser.add_argument("--test_episodes", type=int, default=5)
     
     args = parser.parse_args()
-
-    env = gym.make('MountainCarContinuous-v0', render_mode='human')
-    state_size = env.observation_space.shape[0]
-    action_size = env.action_space.shape[0]
+    config = TD3Config(**{k: v for k, v in vars(args).items() if k in TD3Config().__dict__})
     
-    agent = Agent(state_size=state_size, action_size=action_size, seed=args.seed)
-    
-    print(f"Loading weights from {args.checkpoint}...")
-    try:
-        agent.load(args.checkpoint)
-    except FileNotFoundError:
-        print(f"Error: '{args.checkpoint}' not found. Please train the agent first.")
-        return
-
-    test(env, agent, n_episodes=args.episodes)
-
-if __name__ == "__main__":
-    main()
+    test(config, n_episodes=args.test_episodes)

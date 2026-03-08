@@ -2,60 +2,56 @@ import gymnasium as gym
 import torch
 import numpy as np
 import argparse
-from agent import Agent
-import config
+import os
+from agent import DQNAgent
+from config import DQNConfig
 
-def test(env, agent, n_episodes=5):
-    """
-    Standardized Test Loop.
-    """
-    print(f"Starting test for {n_episodes} episodes. Press Ctrl+C to stop.")
-    
-    try:
-        for i_episode in range(1, n_episodes + 1):
-            state, info = env.reset()
-            score = 0
-            while True:
-                # In testing, we use eps=0.0 to always take the best action
-                action = agent.act(state, eps=0.0)
-                state, reward, terminated, truncated, info = env.step(action)
-                score += reward
-                
-                if terminated or truncated:
-                    print(f"Episode {i_episode}: Final Score: {score}")
-                    break
-                    
-                env.render()
-            
-    except KeyboardInterrupt:
-        print(f"\nStopped by user.")
-    
-    env.close()
-
-def main():
-    parser = argparse.ArgumentParser(description='DQN Cart Pole Testing')
-    parser.add_argument('--checkpoint', type=str, default='model_weight/checkpoint.pth', help='Path to checkpoint')
-    parser.add_argument('--episodes', type=int, default=5, help='Number of episodes to test')
-    parser.add_argument('--seed', type=int, default=config.SEED, help='Random seed')
-    
-    args = parser.parse_args()
-
-    # Create the environment with human rendering
-    env = gym.make('CartPole-v1', render_mode='human', max_episode_steps=5000)
+def test(cfg: DQNConfig, n_episodes=5):
+    """Test the trained DQN agent."""
+    # Create environment with human rendering
+    env = gym.make(cfg.env_id, render_mode='human')
     state_size = env.observation_space.shape[0]
     action_size = env.action_space.n
     
-    # Initialize the agent and load weights
-    agent = Agent(state_size=state_size, action_size=action_size, seed=args.seed)
-    
-    print(f"Loading weights from {args.checkpoint}...")
-    try:
-        agent.load(args.checkpoint)
-    except FileNotFoundError:
-        print(f"Error: '{args.checkpoint}' not found. Please train the agent first.")
-        return
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"Using device: {device}")
 
-    test(env, agent, n_episodes=args.episodes)
+    # Initialize agent and load saved weights
+    agent = DQNAgent(state_size=state_size, action_size=action_size, config=cfg, device=device)
+    
+    checkpoint_path = f"{cfg.checkpoint_dir}/cart_pole_dqn.pt"
+    try:
+        agent.load(checkpoint_path)
+        print(f"Successfully loaded model from {checkpoint_path}")
+    except FileNotFoundError:
+        print(f"Checkpoint {checkpoint_path} not found. Running with random weights.")
+
+    for i in range(1, n_episodes + 1):
+        state, _ = env.reset()
+        score = 0
+        done = False
+        while not done:
+            # Select action greedily (eps=0)
+            action = agent.act(state, eps=0.0)
+            state, reward, terminated, truncated, _ = env.step(action)
+            score += reward
+            done = terminated or truncated
+            
+        print(f"Test Episode {i} | Reward: {score:.2f}")
+        
+    env.close()
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    # Dynamically build parser from DQNConfig fields
+    for key, value in DQNConfig().__dict__.items():
+        if isinstance(value, bool):
+            parser.add_argument(f"--{key}", action="store_true", default=value)
+        else:
+            parser.add_argument(f"--{key}", type=type(value) if value is not None else str, default=value)
+    parser.add_argument("--test_episodes", type=int, default=5)
+    
+    args = parser.parse_args()
+    config = DQNConfig(**{k: v for k, v in vars(args).items() if k in DQNConfig().__dict__})
+    
+    test(config, n_episodes=args.test_episodes)

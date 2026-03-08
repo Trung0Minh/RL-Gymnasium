@@ -5,95 +5,112 @@ import argparse
 import os
 import matplotlib.pyplot as plt
 from collections import deque
-from agent import Agent
-import config
+from agent import TD3Agent
+from config import TD3Config
+from replay import ReplayBuffer
 
-# Device configuration
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+def make_env(env_id, seed, max_t):
+    def thunk():
+        env = gym.make(env_id, max_episode_steps=max_t)
+        env = gym.wrappers.ClipAction(env)
+        return env
+    return thunk
 
-def train(env, agent, n_episodes=2000, max_t=500, print_every=100, resume=False):
-    """
-    Standardized Training Loop for Mountain Car Continuous (DPG).
-    """
-    scores = []                        # list containing scores from each episode
-    scores_window = deque(maxlen=100)  # last 100 scores
-    checkpoint_path = 'model_weight/checkpoint.pth'
+def train(cfg: TD3Config):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
-    os.makedirs('model_weight', exist_ok=True)
+    envs = gym.vector.SyncVectorEnv([make_env(cfg.env_id, cfg.seed + i, cfg.max_t) for i in range(cfg.num_envs)])
+    
+    state_dim = envs.single_observation_space.shape[0]
+    action_dim = envs.single_action_space.shape[0]
+    
+    agent = TD3Agent(state_dim=state_dim, action_dim=action_dim, config=cfg, device=device)
+    replay_buffer = ReplayBuffer(state_dim, action_dim, device, max_size=cfg.buffer_size)
+    
+    checkpoint_path = f"{cfg.checkpoint_dir}/mountain_car_continuous_td3.pt"
+    os.makedirs(cfg.checkpoint_dir, exist_ok=True)
 
-    if resume and os.path.exists(checkpoint_path):
+    if cfg.resume and os.path.exists(checkpoint_path):
         print(f"Resuming training from checkpoint: {checkpoint_path}")
         agent.load(checkpoint_path)
 
-    print(f"Starting training on {device} for {n_episodes} episodes...")
+    scores = []
+    scores_window = deque(maxlen=100)
     
-    for i_episode in range(1, n_episodes + 1):
-        state, info = env.reset()
-        agent.reset_noise()
+    state, _ = envs.reset(seed=cfg.seed)
+    total_timesteps = 0
+    
+    print(f"Starting training on {device}...")
+    
+    for i_episode in range(1, cfg.num_episodes + 1):
+        state, _ = envs.reset()
         score = 0
-        for t in range(max_t):
-            action = agent.act(state)
-            next_state, reward, terminated, truncated, info = env.step(action)
-            done = terminated or truncated
-            agent.step(state, action, reward, next_state, done)
-            state = next_state
-            score += reward
+        
+        for t in range(cfg.max_t):
+            total_timesteps += 1
             
-            if done:
+            if total_timesteps < cfg.start_timesteps:
+                action = envs.action_space.sample()
+            else:
+                action = agent.act(state)
+                # Add exploration noise
+                action = (action + np.random.normal(0, 1.0 * cfg.policy_noise, size=action_dim)).clip(-1.0, 1.0)
+
+            next_state, reward, terminated, truncated, info = envs.step(action)
+            
+            for i in range(cfg.num_envs):
+                done = terminated[i] or truncated[i]
+                
+                # --- Reward Shaping (Mountain Car Continuous Specific) ---
+                pos = next_state[i][0]
+                custom_reward = reward[i]
+                if pos >= 0.45:
+                    custom_reward += 100
+                custom_reward += abs(next_state[i][1]) * 10
+                
+                replay_buffer.add(state[i], action[i], next_state[i], custom_reward, done)
+                score += reward[i]
+            
+            state = next_state
+            
+            if total_timesteps >= cfg.start_timesteps:
+                agent.update(replay_buffer)
+                
+            if np.any(terminated) or np.any(truncated):
                 break
                 
         scores_window.append(score)
         scores.append(score)
-        agent.decay_noise()
         
         avg_score = np.mean(scores_window)
-        print(f"\rEpisode {i_episode}\tAverage Score: {avg_score:.2f}", end="")
+        log_str = f"Episode {i_episode}\tTotal Steps: {total_timesteps}\tAverage Score: {avg_score:.2f}"
         
-        if i_episode % print_every == 0:
-            print(f"\rEpisode {i_episode}\tAverage Score: {avg_score:.2f}")
-            agent.save(checkpoint_path) # Periodic save (overwrite)
+        if i_episode % 50 == 0:
+            print(f"\r{log_str}")
+            agent.save(checkpoint_path)
+        else:
+            print(f"\r{log_str}", end="", flush=True)
 
+    print()
+    envs.close()
     return scores
 
-def main():
-    parser = argparse.ArgumentParser(description='DPG Mountain Car Continuous Training')
-    parser.add_argument('--resume', action='store_true', help='Resume from checkpoint')
-    parser.add_argument('--n_episodes', type=int, default=config.N_EPISODES, help='Number of episodes')
-    parser.add_argument('--max_t', type=int, default=config.MAX_T, help='Max timesteps per episode')
-    parser.add_argument('--print_every', type=int, default=100, help='Print interval and save frequency')
-    
-    # Hyperparameters
-    parser.add_argument('--buffer_size', type=int, default=config.BUFFER_SIZE)
-    parser.add_argument('--batch_size', type=int, default=config.BATCH_SIZE)
-    parser.add_argument('--gamma', type=float, default=config.GAMMA)
-    parser.add_argument('--tau', type=float, default=config.TAU)
-    parser.add_argument('--lr_actor', type=float, default=config.LR_ACTOR)
-    parser.add_argument('--lr_critic', type=float, default=config.LR_CRITIC)
-    parser.add_argument('--noise_sigma', type=float, default=config.NOISE_SIGMA)
-    parser.add_argument('--noise_decay', type=float, default=config.NOISE_DECAY)
-    parser.add_argument('--seed', type=int, default=config.SEED)
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    for key, value in TD3Config().__dict__.items():
+        if isinstance(value, bool):
+            parser.add_argument(f"--{key}", action="store_true", default=value)
+        else:
+            parser.add_argument(f"--{key}", type=type(value) if value is not None else str, default=value)
     
     args = parser.parse_args()
-
-    env = gym.make('MountainCarContinuous-v0')
-    state_size = env.observation_space.shape[0]
-    action_size = env.action_space.shape[0]
+    config = TD3Config(**vars(args))
     
-    agent = Agent(state_size=state_size, action_size=action_size, seed=args.seed,
-                  buffer_size=args.buffer_size, batch_size=args.batch_size,
-                  gamma=args.gamma, tau=args.tau, lr_actor=args.lr_actor, 
-                  lr_critic=args.lr_critic, noise_sigma=args.noise_sigma, 
-                  noise_decay=args.noise_decay)
-    
-    scores = train(env, agent, n_episodes=args.n_episodes, max_t=args.max_t,
-                  print_every=args.print_every, resume=args.resume)
+    scores = train(config)
 
     plt.plot(np.arange(len(scores)), scores)
     plt.ylabel('Score')
     plt.xlabel('Episode #')
-    plt.title("DPG Training Scores for Mountain Car Continuous")
+    plt.title("TD3 Training Scores for Mountain Car Continuous")
     plt.savefig('rewards.png')
     print(f"\nTraining plot saved as rewards.png")
-
-if __name__ == "__main__":
-    main()

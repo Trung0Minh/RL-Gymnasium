@@ -1,29 +1,21 @@
-# Mountain Car Continuous/config.py
+from dataclasses import dataclass
 
-# Replay buffer size
-BUFFER_SIZE = int(1e6)
-# Minibatch size
-BATCH_SIZE = 64
-# Discount factor
-GAMMA = 0.99
-# Soft update parameter
-TAU = 1e-3
-# Learning rate for actor
-LR_ACTOR = 1e-4
-# Learning rate for critic
-LR_CRITIC = 1e-3
-# How often to update the network
-UPDATE_EVERY = 4
-# Noise sigma
-NOISE_SIGMA = 0.5
-# Noise decay
-NOISE_DECAY = 0.999
-
-# Maximum number of training episodes
-N_EPISODES = 2000
-# Maximum number of timesteps per episode
-MAX_T = 500
-# Print interval
-PRINT_EVERY = 100
-# Random seed
-SEED = 1
+@dataclass
+class TD3Config:
+    env_id: str = "MountainCarContinuous-v0"
+    num_episodes: int = 500
+    max_t: int = 1000
+    buffer_size: int = 100000
+    batch_size: int = 64
+    gamma: float = 0.99
+    tau: float = 1e-3
+    lr: float = 5e-4
+    policy_noise: float = 0.2
+    noise_clip: float = 0.5
+    policy_freq: int = 2
+    hidden_dim: int = 256
+    checkpoint_dir: str = "checkpoints"
+    resume: bool = False
+    seed: int = 1
+    num_envs: int = 1
+    start_timesteps: int = 1000

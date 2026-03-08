@@ -1,25 +1,21 @@
-# Pendulum/config.py
+from dataclasses import dataclass
 
-# Replay buffer size
-BUFFER_SIZE = int(1e6)
-# Minibatch size
-BATCH_SIZE = 128
-# Discount factor
-GAMMA = 0.99
-# Soft update parameter
-TAU = 1e-3
-# Actor learning rate
-LR_ACTOR = 1e-4
-# Critic learning rate
-LR_CRITIC = 1e-3
-# L2 weight decay
-WEIGHT_DECAY = 0
-
-# Maximum number of training episodes
-N_EPISODES = 500
-# Maximum number of timesteps per episode
-MAX_T = 200
-# Print interval
-PRINT_EVERY = 100
-# Random seed
-SEED = 2
+@dataclass
+class TD3Config:
+    env_id: str = "Pendulum-v1"
+    num_episodes: int = 500
+    max_t: int = 200
+    buffer_size: int = 100000
+    batch_size: int = 64
+    gamma: float = 0.99
+    tau: float = 1e-3
+    lr: float = 5e-4
+    policy_noise: float = 0.2
+    noise_clip: float = 0.5
+    policy_freq: int = 2
+    hidden_dim: int = 256
+    checkpoint_dir: str = "checkpoints"
+    resume: bool = False
+    seed: int = 1
+    num_envs: int = 1
+    start_timesteps: int = 1000
