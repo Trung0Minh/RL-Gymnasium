@@ -1,12 +1,21 @@
-# Hyperparameters for Lunar Lander DQN
-BUFFER_SIZE = 100000
-BATCH_SIZE = 64
-GAMMA = 0.99
-TAU = 1e-3
-LR = 5e-4
-UPDATE_EVERY = 4
-EPISODES = 2000
-MAX_T = 1000
-EPS_START = 1.0
-EPS_END = 0.01
-EPS_DECAY = 0.995
+from dataclasses import dataclass
+
+@dataclass
+class DQNConfig:
+    env_id: str = "LunarLander-v3"
+    total_timesteps: int = 1000000
+    num_envs: int = 1
+    buffer_size: int = 100000
+    batch_size: int = 64
+    gamma: float = 0.99
+    tau: float = 1e-3
+    lr: float = 5e-4
+    update_every: int = 4
+    eps_start: float = 1.0
+    eps_end: float = 0.01
+    eps_decay: float = 0.995
+    checkpoint_dir: str = "checkpoints"
+    resume: bool = False
+    seed: int = 0
+    num_episodes: int = 2000
+    max_t: int = 1000

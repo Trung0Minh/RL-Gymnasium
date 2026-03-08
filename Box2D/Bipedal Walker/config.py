@@ -1,22 +1,22 @@
-# Hyperparameters
-GAMMA = 0.99
-TAU = 0.005
-LR = 3e-4
-BATCH_SIZE = 256
-HIDDEN_DIM = 256
-REPLAY_SIZE = 1000000
-START_STEPS = 10000
-UPDATE_AFTER = 1000
-EPISODES = 2000
-MAX_T = 2000
+from dataclasses import dataclass
 
-# Speed Optimizations
-NUM_ENVS = 8          # Number of parallel environments
-UPDATE_EVERY = 50     # Update every N steps
-UPDATE_ITERS = 50     # Number of gradient steps to perform
-
-# TD3 Specific
-POLICY_NOISE = 0.2
-NOISE_CLIP = 0.5
-EXPL_NOISE = 0.1
-POLICY_FREQ = 2
+@dataclass
+class TD3Config:
+    env_id: str = "BipedalWalker-v3"
+    total_timesteps: int = 1000000
+    num_envs: int = 1
+    buffer_size: int = 1000000
+    batch_size: int = 256
+    gamma: float = 0.99
+    tau: float = 0.005
+    lr: float = 3e-4
+    policy_noise: float = 0.2
+    noise_clip: float = 0.5
+    policy_freq: int = 2
+    hidden_dim: int = 256
+    checkpoint_dir: str = "checkpoints"
+    resume: bool = False
+    seed: int = 0
+    max_episodes: int = 2000
+    max_t: int = 1600
+    start_timesteps: int = 25000 # Time steps initial random policy is used

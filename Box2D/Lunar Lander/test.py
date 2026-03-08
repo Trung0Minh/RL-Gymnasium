@@ -1,31 +1,30 @@
 import gymnasium as gym
 import torch
 import numpy as np
-from agent import Agent
+from agent import DQNAgent
+from config import DQNConfig
 import argparse
 
-def test(n_episodes=5, checkpoint_path='weights/checkpoint.pth'):
+def test(cfg: DQNConfig, n_episodes=5):
     """Test the trained DQN agent."""
     # Create environment with human rendering
-    env = gym.make('LunarLander-v3', render_mode='human')
+    env = gym.make(cfg.env_id, render_mode='human')
     state_size = env.observation_space.shape[0]
     action_size = env.action_space.n
-    
-    # Initialize agent and load saved weights
-    agent = Agent(state_size=state_size, action_size=action_size, seed=0)
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
 
+    # Initialize agent and load saved weights
+    agent = DQNAgent(state_size=state_size, action_size=action_size, config=cfg, device=device)
+    
+    checkpoint_path = f"{cfg.checkpoint_dir}/lunar_lander_dqn.pt"
     try:
-        agent.qnetwork_local.load_state_dict(torch.load(checkpoint_path, map_location=device))
+        agent.load(checkpoint_path)
         print(f"Successfully loaded model from {checkpoint_path}")
     except FileNotFoundError:
-        print(f"Checkpoint {checkpoint_path} not found.")
-        return
+        print(f"Checkpoint {checkpoint_path} not found. Running with random weights.")
 
-    agent.qnetwork_local.eval()
-    
     for i in range(1, n_episodes + 1):
         state, _ = env.reset()
         score = 0
@@ -43,8 +42,15 @@ def test(n_episodes=5, checkpoint_path='weights/checkpoint.pth'):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--episodes", type=int, default=5)
-    parser.add_argument("--checkpoint", type=str, default="weights/checkpoint.pth")
-    args = parser.parse_args()
+    # Dynamically build parser from DQNConfig fields
+    for key, value in DQNConfig().__dict__.items():
+        if isinstance(value, bool):
+            parser.add_argument(f"--{key}", action="store_true", default=value)
+        else:
+            parser.add_argument(f"--{key}", type=type(value) if value is not None else str, default=value)
+    parser.add_argument("--test_episodes", type=int, default=5)
     
-    test(n_episodes=args.episodes, checkpoint_path=args.checkpoint)
+    args = parser.parse_args()
+    config = DQNConfig(**{k: v for k, v in vars(args).items() if k in DQNConfig().__dict__})
+    
+    test(config, n_episodes=args.test_episodes)

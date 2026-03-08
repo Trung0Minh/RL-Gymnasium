@@ -1,12 +1,21 @@
-# Hyperparameters for Car Racing SAC
-LR = 3e-4
-GAMMA = 0.99
-TAU = 0.005
-ALPHA = 0.2
-BATCH_SIZE = 256
-CAPACITY = 100000
-START_STEPS = 1000
-UPDATES_PER_STEP = 1
-NUM_ENVS = 8
-EPISODES = 5000
-MAX_T = 1000
+from dataclasses import dataclass
+
+@dataclass
+class SACConfig:
+    env_id: str = "CarRacing-v3"
+    total_timesteps: int = 1000000
+    num_envs: int = 8
+    lr: float = 3e-4
+    gamma: float = 0.99
+    tau: float = 0.005
+    alpha: float = 0.2
+    batch_size: int = 256
+    buffer_size: int = 100000
+    start_steps: int = 1000
+    updates_per_step: int = 1
+    checkpoint_dir: str = "checkpoints"
+    resume: bool = False
+    seed: int = 0
+    max_episodes: int = 5000
+    max_t: int = 1000
+    hidden_dim: int = 256

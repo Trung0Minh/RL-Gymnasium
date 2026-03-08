@@ -3,28 +3,10 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 import numpy as np
-import random
-from collections import deque
-
-class ReplayBuffer:
-    def __init__(self, capacity):
-        self.buffer = deque(maxlen=capacity)
-
-    def push(self, state, action, reward, next_state, done):
-        self.buffer.append((state, action, reward, next_state, done))
-
-    def sample(self, batch_size):
-        state, action, reward, next_state, done = zip(*random.sample(self.buffer, batch_size))
-        return (np.stack(state), np.stack(action), np.stack(reward), np.stack(next_state), np.stack(done))
-
-    def __len__(self):
-        return len(self.buffer)
 
 class SACAgent:
-    def __init__(self, actor, q1, q2, q1_target, q2_target, lr=3e-4, gamma=0.99, tau=0.005, alpha=0.2, device="cpu", is_discrete=False):
-        self.gamma = gamma
-        self.tau = tau
-        self.alpha = alpha
+    def __init__(self, actor, q1, q2, q1_target, q2_target, config, device, is_discrete=False):
+        self.config = config
         self.device = device
         self.is_discrete = is_discrete
 
@@ -37,43 +19,75 @@ class SACAgent:
         self.q1_target.load_state_dict(self.q1.state_dict())
         self.q2_target.load_state_dict(self.q2.state_dict())
 
-        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=lr)
-        self.q1_optimizer = optim.Adam(self.q1.parameters(), lr=lr)
-        self.q2_optimizer = optim.Adam(self.q2.parameters(), lr=lr)
+        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=config.lr)
+        self.q1_optimizer = optim.Adam(self.q1.parameters(), lr=config.lr)
+        self.q2_optimizer = optim.Adam(self.q2.parameters(), lr=config.lr)
 
         # Automatic Entropy Tuning
         if self.is_discrete:
-            # target_entropy for discrete is often 0.98 * -log(1/|A|)
             self.target_entropy = -0.98 * np.log(1.0 / 5) # n_actions=5
         else:
             self.target_entropy = -3.0 # n_actions=3
             
         self.log_alpha = torch.zeros(1, requires_grad=True, device=self.device)
-        self.alpha_optimizer = optim.Adam([self.log_alpha], lr=lr)
+        self.alpha_optimizer = optim.Adam([self.log_alpha], lr=config.lr)
+        self.alpha = config.alpha
+
+    def select_action(self, state):
+        state = torch.FloatTensor(state).to(self.device)
+        if len(state.shape) == 3: # single env
+            state = state.unsqueeze(0)
+        with torch.no_grad():
+            if self.is_discrete:
+                probs = self.actor(state)
+                action = probs.argmax(dim=-1).cpu().numpy()
+            else:
+                action, _, _ = self.actor.sample(state)
+                action = action.cpu().numpy()
+        return action
+
+    def save(self, path):
+        torch.save({
+            'actor': self.actor.state_dict(),
+            'q1': self.q1.state_dict(),
+            'q2': self.q2.state_dict(),
+            'q1_target': self.q1_target.state_dict(),
+            'q2_target': self.q2_target.state_dict(),
+            'log_alpha': self.log_alpha,
+            'actor_optimizer': self.actor_optimizer.state_dict(),
+            'q1_optimizer': self.q1_optimizer.state_dict(),
+            'q2_optimizer': self.q2_optimizer.state_dict(),
+            'alpha_optimizer': self.alpha_optimizer.state_dict(),
+        }, path)
+
+    def load(self, path):
+        checkpoint = torch.load(path, map_location=self.device)
+        self.actor.load_state_dict(checkpoint['actor'])
+        self.q1.load_state_dict(checkpoint['q1'])
+        self.q2.load_state_dict(checkpoint['q2'])
+        self.q1_target.load_state_dict(checkpoint['q1_target'])
+        self.q2_target.load_state_dict(checkpoint['q2_target'])
+        self.log_alpha = checkpoint['log_alpha']
+        self.actor_optimizer.load_state_dict(checkpoint['actor_optimizer'])
+        self.q1_optimizer.load_state_dict(checkpoint['q1_optimizer'])
+        self.q2_optimizer.load_state_dict(checkpoint['q2_optimizer'])
+        self.alpha_optimizer.load_state_dict(checkpoint['alpha_optimizer'])
+        self.alpha = self.log_alpha.exp()
 
     def update(self, replay_buffer, batch_size):
-        if len(replay_buffer) < batch_size:
-            return
-
         state, action, reward, next_state, done = replay_buffer.sample(batch_size)
 
-        state = torch.FloatTensor(state).to(self.device)
-        next_state = torch.FloatTensor(next_state).to(self.device)
-        reward = torch.FloatTensor(reward).unsqueeze(1).to(self.device)
-        done = torch.FloatTensor(done).unsqueeze(1).to(self.device)
-
         if self.is_discrete:
-            action = torch.LongTensor(action).unsqueeze(1).to(self.device)
+            action = action.long().unsqueeze(1)
             self._update_discrete(state, action, reward, next_state, done)
         else:
-            action = torch.FloatTensor(action).to(self.device)
             self._update_continuous(state, action, reward, next_state, done)
 
         # Soft Target Update
         for target_param, param in zip(self.q1_target.parameters(), self.q1.parameters()):
-            target_param.data.copy_(target_param.data * (1.0 - self.tau) + param.data * self.tau)
+            target_param.data.copy_(target_param.data * (1.0 - self.config.tau) + param.data * self.config.tau)
         for target_param, param in zip(self.q2_target.parameters(), self.q2.parameters()):
-            target_param.data.copy_(target_param.data * (1.0 - self.tau) + param.data * self.tau)
+            target_param.data.copy_(target_param.data * (1.0 - self.config.tau) + param.data * self.config.tau)
 
     def _update_continuous(self, state, action, reward, next_state, done):
         with torch.no_grad():
@@ -81,7 +95,7 @@ class SACAgent:
             q1_next_target = self.q1_target(next_state, next_action)
             q2_next_target = self.q2_target(next_state, next_action)
             min_q_next_target = torch.min(q1_next_target, q2_next_target) - self.alpha * next_log_prob
-            next_q_value = reward + (1 - done) * self.gamma * min_q_next_target
+            next_q_value = reward + (1 - done) * self.config.gamma * min_q_next_target
 
         q1_loss = F.mse_loss(self.q1(state, action), next_q_value)
         q2_loss = F.mse_loss(self.q2(state, action), next_q_value)
@@ -118,9 +132,8 @@ class SACAgent:
             q2_next_target = self.q2_target(next_state)
             min_q_next_target = torch.min(q1_next_target, q2_next_target)
             
-            # V(s') = \sum \pi(a'|s') [Q(s', a') - \alpha \log \pi(a'|s')]
             next_v = (next_probs * (min_q_next_target - self.alpha * next_log_probs)).sum(dim=1, keepdim=True)
-            next_q_value = reward + (1 - done) * self.gamma * next_v
+            next_q_value = reward + (1 - done) * self.config.gamma * next_v
 
         curr_q1 = self.q1(state).gather(1, action)
         curr_q2 = self.q2(state).gather(1, action)
@@ -142,7 +155,6 @@ class SACAgent:
             q2_val = self.q2(state)
             min_q_val = torch.min(q1_val, q2_val)
         
-        # Policy loss: \sum \pi(a|s) [\alpha \log \pi(a|s) - Q(s, a)]
         actor_loss = (probs * (self.alpha * log_probs - min_q_val)).sum(dim=1).mean()
 
         self.actor_optimizer.zero_grad()

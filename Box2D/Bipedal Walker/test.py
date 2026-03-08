@@ -1,67 +1,71 @@
 import gymnasium as gym
 import torch
 import numpy as np
-from model import Actor
-import pickle
-import config
+from agent import TD3Agent
+from config import TD3Config
 import argparse
+import os
 
-def test(model_path="weights/td3_actor_best.pth", rms_path="weights/state_rms_best.pkl", num_episodes=5):
-    env = gym.make('BipedalWalker-v3', render_mode='human')
+def test(cfg: TD3Config, n_episodes=5):
+    """Test the trained TD3 agent."""
+    # Create environment with human rendering
+    env = gym.make(cfg.env_id, render_mode='human')
     state_dim = env.observation_space.shape[0]
     action_dim = env.action_space.shape[0]
     
-    actor = Actor(state_dim, action_dim, config.HIDDEN_DIM)
-
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
 
-    try:
-        actor.load_state_dict(torch.load(model_path, map_location=device))
-        print(f"Successfully loaded model from {model_path}")
-    except FileNotFoundError:
-        print(f"Model file {model_path} not found.")
-        return
-        
-    actor.eval()
-    actor.to(device)
+    # Initialize agent
+    agent = TD3Agent(state_dim=state_dim, action_dim=action_dim, config=cfg, device=device)
+    
+    checkpoint_path = f"{cfg.checkpoint_dir}/bipedal_walker_td3.pt"
+    stats_path = f"{cfg.checkpoint_dir}/bipedal_walker_obs_rms.pt"
     
     try:
-        with open(rms_path, "rb") as f:
-            state_rms = pickle.load(f)
-        print(f"Successfully loaded RMS from {rms_path}")
+        agent.load(checkpoint_path)
+        print(f"Successfully loaded model from {checkpoint_path}")
     except FileNotFoundError:
-        print(f"RMS file {rms_path} not found.")
-        return
+        print(f"Checkpoint {checkpoint_path} not found. Running with random weights.")
+
+    obs_mean, obs_var = None, None
+    if os.path.exists(stats_path):
+        stats = torch.load(stats_path, map_location=device, weights_only=False)
+        obs_mean = stats["mean"]
+        obs_var = stats["var"]
+        print(f"Loaded normalization stats from {stats_path}")
 
     def normalize_state(state):
-        return np.clip((state - state_rms.mean) / np.sqrt(state_rms.var + 1e-8), -10, 10)
+        if obs_mean is not None:
+            return np.clip((state - obs_mean) / np.sqrt(obs_var + 1e-8), -10, 10)
+        return state
 
-    for i in range(1, num_episodes + 1):
-        state, info = env.reset()
-        episode_reward = 0
+    for i in range(1, n_episodes + 1):
+        state, _ = env.reset()
+        score = 0
         done = False
-        truncated = False
-        
-        while not (done or truncated):
+        while not done:
             state_norm = normalize_state(state)
-            state_t = torch.FloatTensor(state_norm).unsqueeze(0).to(device)
-            with torch.no_grad():
-                action = actor(state_t)
-                action = action.cpu().squeeze(0).numpy()
+            action = agent.select_action(state_norm)
+            state, reward, terminated, truncated, _ = env.step(action[0])
+            score += reward
+            done = terminated or truncated
             
-            state, reward, done, truncated, info = env.step(action)
-            episode_reward += reward
-            
-        print(f"Test Episode {i} | Reward: {episode_reward:.2f}")
-    
+        print(f"Test Episode {i} | Reward: {score:.2f}")
+        
     env.close()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", type=str, default="weights/td3_actor_best.pth")
-    parser.add_argument("--rms", type=str, default="weights/state_rms_best.pkl")
-    parser.add_argument("--episodes", type=int, default=5)
+    # Dynamically build parser from TD3Config fields
+    for key, value in TD3Config().__dict__.items():
+        if isinstance(value, bool):
+            parser.add_argument(f"--{key}", action="store_true", default=value)
+        else:
+            parser.add_argument(f"--{key}", type=type(value) if value is not None else str, default=value)
+    parser.add_argument("--test_episodes", type=int, default=5)
+    
     args = parser.parse_args()
-
-    test(args.model, args.rms, args.episodes)
+    config = TD3Config(**{k: v for k, v in vars(args).items() if k in TD3Config().__dict__})
+    
+    test(config, n_episodes=args.test_episodes)

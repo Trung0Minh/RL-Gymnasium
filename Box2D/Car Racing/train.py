@@ -7,35 +7,16 @@ import matplotlib.pyplot as plt
 from collections import deque
 from wrappers import make_env
 from model import SACActor, SACQNetwork, SACDiscreteActor, SACDiscreteQNetwork
-from sac import SACAgent, ReplayBuffer
-import config
+from agent import SACAgent
+from replay import ReplayBuffer
+from config import SACConfig
 
-def train():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", type=str, choices=["continuous", "discrete"], default="continuous")
-    parser.add_argument("--episodes", type=int, default=config.EPISODES)
-    parser.add_argument("--max_t", type=int, default=config.MAX_T)
-    parser.add_argument("--lr", type=float, default=config.LR)
-    parser.add_argument("--gamma", type=float, default=config.GAMMA)
-    parser.add_argument("--tau", type=float, default=config.TAU)
-    parser.add_argument("--alpha", type=float, default=config.ALPHA)
-    parser.add_argument("--batch_size", type=int, default=config.BATCH_SIZE)
-    parser.add_argument("--num_envs", type=int, default=config.NUM_ENVS)
-    parser.add_argument("--capacity", type=int, default=config.CAPACITY)
-    parser.add_argument("--start_steps", type=int, default=config.START_STEPS)
-    parser.add_argument("--updates_per_step", type=int, default=config.UPDATES_PER_STEP)
-    parser.add_argument("--load", type=str, default=None, help="Path to actor checkpoint to continue training")
-    args = parser.parse_args()
-
+def train(cfg: SACConfig, mode: str):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
-    if device.type == "cuda":
-        torch.set_num_threads(1)
     
-    print(f"Training with SAC in {args.mode} mode using {args.num_envs} envs")
-
-    is_continuous = (args.mode == "continuous")
-    env_fns = [make_env("CarRacing-v3", continuous=is_continuous, seed=i, max_episode_steps=args.max_t) for i in range(args.num_envs)]
+    is_continuous = (mode == "continuous")
+    env_fns = [make_env(cfg.env_id, continuous=is_continuous, seed=cfg.seed + i, max_episode_steps=cfg.max_t) for i in range(cfg.num_envs)]
     envs = gym.vector.AsyncVectorEnv(env_fns)
     
     if is_continuous:
@@ -51,41 +32,41 @@ def train():
         q1_target = SACDiscreteQNetwork(n_stack=4, n_actions=5).to(device)
         q2_target = SACDiscreteQNetwork(n_stack=4, n_actions=5).to(device)
 
-    # Load checkpoint if requested
-    if args.load and os.path.isfile(args.load):
-        print(f"Loading checkpoint from {args.load}")
-        actor.load_state_dict(torch.load(args.load, map_location=device))
+    agent = SACAgent(actor, q1, q2, q1_target, q2_target, config=cfg, device=device, is_discrete=not is_continuous)
+    buffer = ReplayBuffer(capacity=cfg.buffer_size, device=device)
 
-    agent = SACAgent(actor, q1, q2, q1_target, q2_target, lr=args.lr, gamma=args.gamma, tau=args.tau, alpha=args.alpha, device=device, is_discrete=not is_continuous)
-    buffer = ReplayBuffer(capacity=args.capacity)
+    checkpoint_path = f"{cfg.checkpoint_dir}/car_racing_sac_{mode}.pt"
+    os.makedirs(cfg.checkpoint_dir, exist_ok=True)
+
+    if cfg.resume and os.path.exists(checkpoint_path):
+        print(f"Resuming training from checkpoint: {checkpoint_path}")
+        agent.load(checkpoint_path)
 
     scores = []
     scores_window = deque(maxlen=100)
     states, _ = envs.reset()
-    episode_rewards = np.zeros(args.num_envs)
-    best_reward = -float('inf')
+    episode_rewards = np.zeros(cfg.num_envs)
     total_steps = 0
     finished_episodes = 0
     
-    while finished_episodes < args.episodes:
-        if total_steps < args.start_steps and not args.load:
+    print(f"Starting training in {mode} mode...")
+    
+    while finished_episodes < cfg.max_episodes:
+        if total_steps < cfg.start_steps and not cfg.resume:
             actions = envs.action_space.sample()
         else:
-            states_t = torch.tensor(states, dtype=torch.float32).to(device)
-            with torch.no_grad():
-                if is_continuous:
-                    actions_t, _, _ = actor.sample(states_t)
-                    actions = actions_t.cpu().numpy()
-                    actions[:, 1] = (actions[:, 1] + 1) / 2
-                    actions[:, 2] = (actions[:, 2] + 1) / 2
-                else:
-                    actions_t, _, _ = actor.sample(states_t)
-                    actions = actions_t.cpu().numpy()
+            actions = agent.select_action(states)
+            if is_continuous:
+                # CarRacing continuous actions are [steer, gas, break]
+                # steer in [-1, 1], gas in [0, 1], break in [0, 1]
+                # actor output is tanh in [-1, 1]
+                actions[:, 1] = (actions[:, 1] + 1) / 2
+                actions[:, 2] = (actions[:, 2] + 1) / 2
         
         next_states, rewards, terminateds, truncateds, infos = envs.step(actions)
         dones = terminateds | truncateds
         
-        for i in range(args.num_envs):
+        for i in range(cfg.num_envs):
             real_next_state = next_states[i]
             if dones[i] and "final_observation" in infos:
                 real_next_state = infos["final_observation"][i]
@@ -99,35 +80,48 @@ def train():
                 scores.append(episode_rewards[i])
                 
                 avg_rew = np.mean(scores_window)
-                print(f"\rEpisode {finished_episodes} | Reward: {episode_rewards[i]:.2f} | Running Avg: {avg_rew:.2f}", end="")
+                log_str = f"Episode {finished_episodes} | Avg Ep Reward: {avg_rew:.2f}"
                 
-                if finished_episodes % 100 == 0:
-                    print(f"\rEpisode {finished_episodes} | Reward: {episode_rewards[i]:.2f} | Running Avg: {avg_rew:.2f}")
-
-                if avg_rew > best_reward and len(scores_window) >= 100:
-                    best_reward = avg_rew
-                    os.makedirs('weights', exist_ok=True)
-                    checkpoint_path = f"weights/best_sac_{args.mode}.pth"
-                    torch.save(actor.state_dict(), checkpoint_path)
+                if finished_episodes % 50 == 0:
+                    print(f"\r{log_str}")
+                    agent.save(checkpoint_path)
+                else:
+                    print(f"\r{log_str}", end="", flush=True)
                 
                 episode_rewards[i] = 0
 
         states = next_states
-        total_steps += args.num_envs
+        total_steps += cfg.num_envs
 
-        if total_steps >= args.start_steps or args.load:
-            for _ in range(args.updates_per_step * args.num_envs):
-                agent.update(buffer, args.batch_size)
+        if total_steps >= cfg.start_steps or cfg.resume:
+            for _ in range(cfg.updates_per_step * cfg.num_envs):
+                agent.update(buffer, cfg.batch_size)
 
     envs.close()
+    return scores
 
-    # Plot results
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--mode", type=str, choices=["continuous", "discrete"], default="continuous")
+    # Dynamically build parser from SACConfig fields
+    for key, value in SACConfig().__dict__.items():
+        if isinstance(value, bool):
+            parser.add_argument(f"--{key}", action="store_true", default=value)
+        else:
+            parser.add_argument(f"--{key}", type=type(value) if value is not None else str, default=value)
+    
+    args = parser.parse_args()
+    mode = args.mode
+    # Remove mode from args to match SACConfig fields
+    args_dict = vars(args)
+    del args_dict['mode']
+    config = SACConfig(**args_dict)
+    
+    scores = train(config, mode)
+
     plt.figure()
     plt.plot(np.arange(len(scores)), scores)
     plt.ylabel('Score')
     plt.xlabel('Episode #')
-    plt.savefig('scores.png')
-    print(f"\nTraining complete. Scores plot saved as 'scores.png'.")
-
-if __name__ == "__main__":
-    train()
+    plt.savefig('rewards.png')
+    print(f"\nTraining plot saved as rewards.png")

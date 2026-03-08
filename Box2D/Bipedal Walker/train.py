@@ -1,153 +1,125 @@
 import gymnasium as gym
 import torch
 import numpy as np
-import matplotlib.pyplot as plt
-from agent import TD3Agent
-from replay_buffer import ReplayBuffer
-import config
-from collections import deque
-from utils import RunningMeanStd
-import pickle
-import os
 import argparse
+import os
+import matplotlib.pyplot as plt
+from collections import deque
+from agent import TD3Agent
+from config import TD3Config
+from replay import ReplayBuffer
 
-def make_env(max_episode_steps=None):
-    def _init():
-        env = gym.make('BipedalWalker-v3', max_episode_steps=max_episode_steps)
+def make_env(env_id, seed):
+    def thunk():
+        env = gym.make(env_id)
+        env = gym.wrappers.ClipAction(env)
         return env
-    return _init
+    return thunk
 
-def train(args):
+def train(cfg: TD3Config):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
-
-    # Vectorized environments
-    envs = gym.vector.AsyncVectorEnv([make_env(args.max_t) for _ in range(args.num_envs)])
+    
+    envs = gym.vector.SyncVectorEnv([make_env(cfg.env_id, cfg.seed + i) for i in range(cfg.num_envs)])
+    envs = gym.wrappers.vector.RecordEpisodeStatistics(envs)
+    envs = gym.wrappers.vector.NormalizeObservation(envs)
+    obs_rms_wrapper = envs
+    envs = gym.wrappers.vector.TransformObservation(envs, lambda obs: np.clip(obs, -10, 10))
+    # Not using NormalizeReward as it's often more tricky for off-policy.
     
     state_dim = envs.single_observation_space.shape[0]
     action_dim = envs.single_action_space.shape[0]
     
-    agent = TD3Agent(state_dim, action_dim)
+    agent = TD3Agent(state_dim=state_dim, action_dim=action_dim, config=cfg, device=device)
+    replay_buffer = ReplayBuffer(state_dim, action_dim, device, max_size=cfg.buffer_size)
     
-    # Load checkpoint if requested
-    if args.load:
-        if os.path.isfile(args.load):
-            print(f"Loading checkpoint from {args.load}")
-            agent.actor.load_state_dict(torch.load(args.load, map_location=device))
-            agent.actor_target.load_state_dict(agent.actor.state_dict())
-            if args.rms_load and os.path.isfile(args.rms_load):
-                print(f"Loading RMS from {args.rms_load}")
-                with open(args.rms_load, "rb") as f:
-                    state_rms = pickle.load(f)
-            else:
-                state_rms = RunningMeanStd(shape=(state_dim,))
-        else:
-            print(f"Checkpoint {args.load} not found. Starting from scratch.")
-            state_rms = RunningMeanStd(shape=(state_dim,))
-    else:
-        state_rms = RunningMeanStd(shape=(state_dim,))
-    
-    replay_buffer = ReplayBuffer(state_dim, action_dim, args.replay_size)
-    
+    checkpoint_path = f"{cfg.checkpoint_dir}/bipedal_walker_td3.pt"
+    stats_path = f"{cfg.checkpoint_dir}/bipedal_walker_obs_rms.pt"
+    os.makedirs(cfg.checkpoint_dir, exist_ok=True)
+
+    if cfg.resume:
+        if os.path.exists(checkpoint_path):
+            agent.load(checkpoint_path)
+            print(f"Resumed model from {checkpoint_path}")
+        if os.path.exists(stats_path):
+            stats = torch.load(stats_path, map_location=device, weights_only=False)
+            obs_rms_wrapper.obs_rms.mean = stats["mean"]
+            obs_rms_wrapper.obs_rms.var = stats["var"]
+            print(f"Resumed normalization stats from {stats_path}")
+
     scores = []
     scores_window = deque(maxlen=100)
-    best_reward = -np.inf
+    
+    state, _ = envs.reset(seed=cfg.seed)
     total_timesteps = 0
-    finished_episodes = 0
-
-    def normalize_state(state):
-        state_rms.update(state)
-        return np.clip((state - state_rms.mean) / np.sqrt(state_rms.var + 1e-8), -10, 10)
-
-    states, infos = envs.reset()
-    states = normalize_state(states)
     
-    episode_rewards = np.zeros(args.num_envs)
+    print(f"Starting training on {device}...")
     
-    while finished_episodes < args.episodes:
-        total_timesteps += args.num_envs
+    for i_episode in range(1, cfg.max_episodes + 1):
+        state, _ = envs.reset()
+        score = 0
         
-        # Select action
-        if total_timesteps < args.start_steps and not args.load:
-            actions = envs.action_space.sample()
-        else:
-            actions = agent.select_action(states)
-            actions = (actions + np.random.normal(0, args.expl_noise, size=actions.shape)).clip(-1, 1)
-        
-        # Step environments
-        next_states, rewards, dones, truncateds, infos = envs.step(actions)
-        next_states_norm = normalize_state(next_states)
-        
-        # Store transitions in replay buffer
-        for i in range(args.num_envs):
-            actual_done = dones[i] or truncateds[i]
-            replay_buffer.add(states[i], actions[i], next_states_norm[i], rewards[i], dones[i])
-            episode_rewards[i] += rewards[i]
+        for t in range(cfg.max_t):
+            total_timesteps += 1
             
-            if actual_done:
-                finished_episodes += 1
-                scores_window.append(episode_rewards[i])
-                scores.append(episode_rewards[i])
-                
-                avg_rew = np.mean(scores_window)
-                print(f"\rEpisode {finished_episodes} | Reward: {episode_rewards[i]:.2f} | Running Avg: {avg_rew:.2f}", end="")
-                
-                if finished_episodes % 100 == 0:
-                    print(f"\rEpisode {finished_episodes} | Reward: {episode_rewards[i]:.2f} | Running Avg: {avg_rew:.2f}")
+            if total_timesteps < cfg.start_timesteps:
+                action = envs.action_space.sample()
+            else:
+                action = agent.select_action(state)
+                # Add exploration noise
+                action = (action + np.random.normal(0, 1.0 * cfg.policy_noise, size=action_dim)).clip(-1.0, 1.0)
 
-                if avg_rew > best_reward and len(scores_window) >= 100:
-                    best_reward = avg_rew
-                    os.makedirs('weights', exist_ok=True)
-                    torch.save(agent.actor.state_dict(), "weights/td3_actor_best.pth")
-                    with open("weights/state_rms_best.pkl", "wb") as f:
-                        pickle.dump(state_rms, f)
+            next_state, reward, terminated, truncated, info = envs.step(action)
+            
+            for i in range(cfg.num_envs):
+                done = terminated[i] or truncated[i]
+                # Note: NormalizeObservation already normalized `state` and `next_state`.
+                replay_buffer.add(state[i], action[i], next_state[i], reward[i], done)
+                score += reward[i]
+            
+            state = next_state
+            
+            if total_timesteps >= cfg.start_timesteps:
+                agent.update(replay_buffer)
                 
-                episode_rewards[i] = 0
+            if np.any(terminated) or np.any(truncated):
+                break
                 
-        states = next_states_norm
+        scores_window.append(score)
+        scores.append(score)
         
-        # Periodic Batch Updates
-        if (total_timesteps >= args.update_after or args.load) and (total_timesteps // args.num_envs) % args.update_every == 0:
-            agent.update(replay_buffer, iterations=args.update_iters)
+        avg_score = np.mean(scores_window)
+        log_str = f"Episode {i_episode}\tTotal Steps: {total_timesteps}\tAverage Score: {avg_score:.2f}"
         
-        if len(scores_window) > 0 and np.mean(scores_window) > 300:
-            print("\nSolved!")
+        if i_episode % 50 == 0:
+            print(f"\r{log_str}")
+            agent.save(checkpoint_path)
+            torch.save({
+                "mean": obs_rms_wrapper.obs_rms.mean,
+                "var": obs_rms_wrapper.obs_rms.var
+            }, stats_path)
+        else:
+            print(f"\r{log_str}", end="", flush=True)
 
+    print()
     envs.close()
-
-    # Plot results
-    plt.figure()
-    plt.plot(np.arange(len(scores)), scores)
-    plt.ylabel('Score')
-    plt.xlabel('Episode #')
-    plt.savefig('scores.png')
-    print(f"\nTraining complete. Scores plot saved as 'scores.png'.")
+    return scores
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--num_envs", type=int, default=config.NUM_ENVS)
-    parser.add_argument("--episodes", type=int, default=config.EPISODES)
-    parser.add_argument("--max_t", type=int, default=config.MAX_T)
-    parser.add_argument("--replay_size", type=int, default=config.REPLAY_SIZE)
-    parser.add_argument("--start_steps", type=int, default=config.START_STEPS)
-    parser.add_argument("--expl_noise", type=float, default=config.EXPL_NOISE)
-    parser.add_argument("--update_after", type=int, default=config.UPDATE_AFTER)
-    parser.add_argument("--update_every", type=int, default=config.UPDATE_EVERY)
-    parser.add_argument("--update_iters", type=int, default=config.UPDATE_ITERS)
-    parser.add_argument("--lr", type=float, default=config.LR)
-    parser.add_argument("--batch_size", type=int, default=config.BATCH_SIZE)
-    parser.add_argument("--gamma", type=float, default=config.GAMMA)
-    parser.add_argument("--tau", type=float, default=config.TAU)
-    parser.add_argument("--hidden_dim", type=int, default=config.HIDDEN_DIM)
-    parser.add_argument("--load", type=str, default=None, help="Path to actor checkpoint to continue training")
-    parser.add_argument("--rms_load", type=str, default=None, help="Path to state_rms checkpoint")
+    for key, value in TD3Config().__dict__.items():
+        if isinstance(value, bool):
+            parser.add_argument(f"--{key}", action="store_true", default=value)
+        else:
+            parser.add_argument(f"--{key}", type=type(value) if value is not None else str, default=value)
+    
     args = parser.parse_args()
+    config = TD3Config(**vars(args))
+    
+    scores = train(config)
 
-    # Update config for agent
-    config.LR = args.lr
-    config.BATCH_SIZE = args.batch_size
-    config.GAMMA = args.gamma
-    config.TAU = args.tau
-    config.HIDDEN_DIM = args.hidden_dim
-
-    train(args)
+    plt.plot(np.arange(len(scores)), scores)
+    plt.ylabel('Score')
+    plt.xlabel('Episode #')
+    plt.title("TD3 Training Scores for Bipedal Walker")
+    plt.savefig('rewards.png')
+    print(f"\nTraining plot saved as rewards.png")
